@@ -92,7 +92,11 @@ window.ERMStorage = (() => {
             ? parsed.attendance.records
             : deepClone(window.ERMDefaults.attendance.records)
         },
-        ui: { ...deepClone(window.ERMDefaults.ui), ...(parsed.ui || {}) }
+        ui: {
+          ...deepClone(window.ERMDefaults.ui),
+          ...(parsed.ui || {}),
+          activityLog: Array.isArray(parsed.ui?.activityLog) ? parsed.ui.activityLog.slice(0, 40) : []
+        }
       };
 
       const legacyFixedCosts = ['Internet y software', 'Mantención de equipos'];

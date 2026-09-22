@@ -14,28 +14,18 @@
   <script type="module" src="https://ajax.googleapis.com/ajax/libs/model-viewer/3.4.0/model-viewer.min.js"></script>
 </head>
 <body>
-  <div class="logo-3d-container">
-    <model-viewer
-      src="assets/logotesta.glb"
-      alt="Logo AndiWorks 3D"
-      auto-rotate
-      rotation-per-second="90deg"
-      camera-orbit="0deg 90deg 105%"
-      field-of-view="1deg"
-      min-field-of-view="1deg"
-      max-field-of-view="1deg"
-      disable-zoom
-      disable-pan
-      interaction-prompt="none"
-      loading="eager"
-      shadow-intensity="0">
-    </model-viewer>
-  </div>
-
   <div id="session-panel" class="session-panel is-hidden" aria-hidden="true">
     <span class="session-label">Sesión de: Andrés Baeza</span>
     <button id="session-logout-btn" type="button" class="btn btn-soft session-btn">Cerrar Sesión</button>
     <button type="button" class="btn btn-soft session-btn" data-action="save-all-bases-now" title="Guarda y confirma que todas las bases quedaron respaldadas">Guardar Bases</button>
+  </div>
+
+  <div id="activity-log-widget" class="activity-log-widget">
+    <button type="button" class="activity-log-toggle" data-action="toggle-activity-log" title="Ver registro de actividad" aria-label="Ver registro de actividad" aria-expanded="false">
+      <span class="activity-log-icon" aria-hidden="true">☰</span>
+      <span id="activity-log-latest" class="activity-log-latest">Sin actividad reciente</span>
+    </button>
+    <div id="activity-log-list" class="activity-log-list is-hidden"></div>
   </div>
 
   <div class="app-shell">
@@ -117,6 +107,37 @@
       <div class="inline-actions">
         <button class="btn btn-primary" data-action="copy-ai-brief">Copiar texto</button>
         <button class="btn btn-soft" data-action="close-ai-brief">Cerrar</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="calculator-modal" class="notes-modal is-hidden" aria-hidden="true">
+    <div class="notes-modal-backdrop" data-action="close-calculator"></div>
+    <div class="calculator-card" role="dialog" aria-modal="true" aria-labelledby="calculator-title">
+      <div class="section-title">
+        <h3 id="calculator-title">Calculadora</h3>
+        <button class="btn btn-soft btn-mini-close" data-action="close-calculator" title="Cerrar" aria-label="Cerrar">✕</button>
+      </div>
+      <input id="calculator-display" class="calculator-display" type="text" readonly value="0" />
+      <div class="calculator-pad">
+        <button class="btn btn-soft calc-key calc-key-wide" data-calc-action="clear">C</button>
+        <button class="btn btn-soft calc-key" data-calc-action="backspace">⌫</button>
+        <button class="btn btn-soft calc-key" data-calc-op="/">÷</button>
+        <button class="btn btn-soft calc-key" data-calc-digit="7">7</button>
+        <button class="btn btn-soft calc-key" data-calc-digit="8">8</button>
+        <button class="btn btn-soft calc-key" data-calc-digit="9">9</button>
+        <button class="btn btn-soft calc-key" data-calc-op="*">×</button>
+        <button class="btn btn-soft calc-key" data-calc-digit="4">4</button>
+        <button class="btn btn-soft calc-key" data-calc-digit="5">5</button>
+        <button class="btn btn-soft calc-key" data-calc-digit="6">6</button>
+        <button class="btn btn-soft calc-key" data-calc-op="-">−</button>
+        <button class="btn btn-soft calc-key" data-calc-digit="1">1</button>
+        <button class="btn btn-soft calc-key" data-calc-digit="2">2</button>
+        <button class="btn btn-soft calc-key" data-calc-digit="3">3</button>
+        <button class="btn btn-soft calc-key" data-calc-op="+">+</button>
+        <button class="btn btn-soft calc-key calc-key-wide" data-calc-digit="0">0</button>
+        <button class="btn btn-soft calc-key" data-calc-digit=".">.</button>
+        <button class="btn btn-primary calc-key" data-calc-action="equals">=</button>
       </div>
     </div>
   </div>

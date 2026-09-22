@@ -48,13 +48,15 @@
   const style = document.createElement('style');
   style.textContent = `
     .sync-login{position:fixed;inset:0;z-index:5000;display:flex;align-items:center;justify-content:center;background:var(--bg,#f4f5f7);padding:16px}
-    .sync-login form{width:min(360px,100%);background:var(--panel,#fff);border:var(--border,1px solid #d5d8de);border-radius:6px;padding:22px;display:flex;flex-direction:column;gap:10px;color:var(--text,#1c1f26);font-family:inherit}
+    .sync-login-stack{width:min(360px,100%);display:flex;flex-direction:column;align-items:center;gap:12px}
+    .sync-login-stack model-viewer{width:110px;height:110px;display:block}
+    .sync-login form{width:100%;background:var(--panel,#fff);border:var(--border,1px solid #d5d8de);border-radius:6px;padding:22px;display:flex;flex-direction:column;gap:10px;color:var(--ink,#1c1f26);font-family:inherit}
     .sync-login h2{margin:0 0 4px;font-size:20px}
     .sync-login input{padding:9px 10px;border:var(--border,1px solid #d5d8de);border-radius:4px;font:inherit;background:var(--panel-soft,#fff);color:inherit}
     .sync-login button{padding:10px;border:0;border-radius:4px;background:var(--brand,#2563eb);color:#fff;font:inherit;cursor:pointer}
     .sync-login button:disabled{opacity:.6;cursor:wait}
     .sync-login .sync-error{color:#c62828;font-size:13px;min-height:16px}
-    .sync-badge{position:fixed;left:10px;bottom:10px;z-index:4000;display:flex;gap:8px;align-items:center;padding:4px 10px;font-size:12px;border-radius:14px;background:var(--panel,#fff);border:var(--border,1px solid #d5d8de);color:var(--text,#1c1f26)}
+    .sync-badge{position:fixed;left:10px;bottom:10px;z-index:4000;display:flex;gap:8px;align-items:center;padding:4px 10px;font-size:12px;border-radius:14px;background:var(--panel,#fff);border:var(--border,1px solid #d5d8de);color:var(--ink,#1c1f26)}
     .sync-badge button{border:0;background:none;color:var(--brand,#2563eb);cursor:pointer;font:inherit;padding:0}
     .sync-banner{position:fixed;top:0;left:0;right:0;z-index:5000;padding:8px 14px;text-align:center;font-size:13px;background:#fff3cd;color:#5c4400}
     .sync-banner button{margin-left:8px}
@@ -91,14 +93,16 @@
       const overlay = document.createElement('div');
       overlay.className = 'sync-login';
       overlay.innerHTML = `
-        <form>
-          <model-viewer src="assets/logotesta.glb" alt="Logo AndiWorks 3D" auto-rotate rotation-per-second="90deg" camera-orbit="0deg 90deg 105%" field-of-view="1deg" min-field-of-view="1deg" max-field-of-view="1deg" disable-zoom disable-pan interaction-prompt="none" loading="eager" shadow-intensity="0" style="width:110px;height:110px;margin:0 auto 6px;display:block;"></model-viewer>
-          <h2>AndiApp</h2>
-          <input type="email" name="email" placeholder="Correo" autocomplete="username" required />
-          <input type="password" name="password" placeholder="Contraseña" autocomplete="current-password" required />
-          <div class="sync-error" role="alert"></div>
-          <button type="submit">Entrar</button>
-        </form>`;
+        <div class="sync-login-stack">
+          <model-viewer src="assets/logotesta.glb" alt="Logo AndiWorks 3D" auto-rotate rotation-per-second="90deg" camera-orbit="0deg 90deg 105%" field-of-view="1deg" min-field-of-view="1deg" max-field-of-view="1deg" disable-zoom disable-pan interaction-prompt="none" loading="eager" shadow-intensity="0"></model-viewer>
+          <form>
+            <h2>AndiApp</h2>
+            <input type="email" name="email" placeholder="Correo" autocomplete="username" required />
+            <input type="password" name="password" placeholder="Contraseña" autocomplete="current-password" required />
+            <div class="sync-error" role="alert"></div>
+            <button type="submit">Entrar</button>
+          </form>
+        </div>`;
       document.body.appendChild(overlay);
       const form = overlay.querySelector('form');
       const errorBox = overlay.querySelector('.sync-error');

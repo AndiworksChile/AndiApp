@@ -1361,7 +1361,7 @@ select option.option-friend { color: #966d00; font-weight: 700; }
 
 /* ─── SESSION PANEL ─── */
 .session-panel {
-  position: fixed; top: 16px; right: 108px; z-index: 1002;
+  position: fixed; top: 16px; right: 16px; z-index: 1002;
   display: flex; flex-direction: column; align-items: stretch; gap: 6px;
   background: var(--panel); border: 1px solid var(--line); padding: 10px 12px;
 }
@@ -1373,16 +1373,34 @@ select option.option-friend { color: #966d00; font-weight: 700; }
 .session-btn { font-size: 9px; padding: 6px 10px; white-space: nowrap; }
 body.theme-dark .session-panel { background: var(--panel); border-color: var(--line); }
 
-/* ─── LOGO 3D ─── */
-.logo-3d-container {
-  position: fixed; top: 16px; right: 16px; z-index: 1001;
-  pointer-events: auto; width: 80px; height: 80px;
-  transition: transform 0.35s cubic-bezier(0.34,1.56,0.64,1); cursor: pointer;
+/* ─── ACTIVITY LOG WIDGET ─── */
+.activity-log-widget {
+  position: fixed; right: 16px; bottom: 16px; z-index: 1002;
+  display: flex; flex-direction: column; align-items: stretch; gap: 6px;
+  max-width: min(320px, calc(100vw - 32px));
 }
-.logo-3d-container model-viewer { width: 100%; height: 100%; display: block; }
-.logo-3d-container model-viewer::part(default-progress-bar) { display: none; }
-.logo-3d-container:hover  { transform: scale(1.06); }
-.logo-3d-container:active { transform: scale(0.97); }
+.activity-log-toggle {
+  display: flex; align-items: center; gap: 8px;
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 8px 12px; cursor: pointer; font: inherit; color: var(--ink);
+  box-shadow: var(--shadow); max-width: 100%;
+}
+.activity-log-icon { font-size: 13px; opacity: 0.75; flex: 0 0 auto; }
+.activity-log-latest {
+  font-size: 11px; font-weight: 700; white-space: nowrap; overflow: hidden;
+  text-overflow: ellipsis; color: var(--muted);
+}
+.activity-log-list {
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  box-shadow: var(--shadow); padding: 8px 10px; max-height: 260px; overflow-y: auto;
+  display: flex; flex-direction: column; gap: 6px;
+}
+.activity-log-list.is-hidden { display: none; }
+.activity-log-empty { font-size: 11px; color: var(--muted); }
+.activity-log-entry { display: flex; flex-direction: column; gap: 1px; }
+.activity-log-entry .activity-log-entry-msg { font-size: 11px; color: var(--ink); }
+.activity-log-entry .activity-log-entry-at { font-size: 9px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+.activity-log-entry + .activity-log-entry { border-top: 1px solid var(--line-soft); padding-top: 6px; }
 
 /* ─── MODALS ─── */
 .notes-modal {
@@ -1400,6 +1418,20 @@ body.theme-dark .session-panel { background: var(--panel); border-color: var(--l
 }
 .update-modal-card { width: min(760px,calc(100vw - 20px)); }
 .notes-textarea { width: 100%; min-height: 210px; resize: vertical; }
+
+.calculator-card {
+  position: relative; width: min(300px,calc(100vw - 20px));
+  background: var(--panel); border: var(--border);
+  border-radius: var(--radius); padding: 16px; box-shadow: var(--shadow);
+}
+.calculator-display {
+  width: 100%; margin: 10px 0; padding: 10px 12px; font-size: 22px; font-weight: 700;
+  text-align: right; border: var(--border); border-radius: var(--radius);
+  background: var(--panel-soft); color: var(--ink);
+}
+.calculator-pad { display: grid; grid-template-columns: repeat(4,1fr); gap: 6px; }
+.calc-key { padding: 12px 0; font-size: 16px; font-weight: 700; }
+.calc-key-wide { grid-column: span 2; }
 
 .notes-panel { position: fixed; inset: 0; z-index: 1250; pointer-events: none; }
 .notes-panel-card {
@@ -1674,8 +1706,7 @@ body.theme-dark .session-panel { background: var(--panel); border-color: var(--l
   .field-wide-2 { grid-column: span 1; }
   .grid-span-2  { grid-column: span 1; }
   .app-footer   { flex-direction: column; gap: 7px; text-align: center; }
-  .logo-3d-container { top: 8px; right: 8px; width: 62px; height: 62px; }
-  .session-panel { top: 8px; right: 78px; padding: 6px 8px; }
+  .session-panel { top: 8px; right: 8px; padding: 6px 8px; }
   .nav-tabs { padding-right: 0; }
 }
 @media (max-width: 700px) {

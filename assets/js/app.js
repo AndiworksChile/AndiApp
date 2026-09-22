@@ -202,7 +202,8 @@ Objetivo
       moon: '☾',       // ☾  tema oscuro
       sun: '☼',        // ☼  tema claro
       lock: '■',       // ■  bloqueado
-      unlock: '□'      // □  desbloqueado
+      unlock: '□',     // □  desbloqueado
+      calculator: '▦'  // ▦  calculadora
     };
     const icon = iconByName[name] || iconByName.plus;
     const variantClass = name === 'eyeClosed' ? 'ui-icon-eye-closed' : '';
@@ -2579,7 +2580,7 @@ Objetivo
     return (state.orders || []).find((item) => idsEqual(item.id, orderId)) || null;
   }
 
-  function stampBaseUpdate(baseKey) {
+  function stampBaseUpdate(baseKey, options = {}) {
     const stamp = new Date().toISOString();
     if (baseKey === 'scenario') state.ui.baseScenarioUpdatedAt = stamp;
     if (baseKey === 'database') state.ui.baseDatabaseUpdatedAt = stamp;
@@ -2591,6 +2592,43 @@ Objetivo
     if (baseKey === 'desired') state.ui.baseDesiredUpdatedAt = stamp;
     if (baseKey === 'attendance') state.ui.baseAttendanceUpdatedAt = stamp;
     if (baseKey === 'finance') state.ui.baseFinanceUpdatedAt = stamp;
+
+    // La asistencia registra sus propios mensajes (turno iniciado/cerrado) en logActivity.
+    if (!options.silent && baseKey !== 'attendance') {
+      logActivity(`Dato guardado: ${baseLabels[baseKey] || baseKey}`);
+    }
+  }
+
+  function logActivity(message) {
+    const text = String(message || '').trim();
+    if (!text) return;
+    state.ui.activityLog = Array.isArray(state.ui.activityLog) ? state.ui.activityLog : [];
+    state.ui.activityLog.unshift({ message: text, at: new Date().toISOString() });
+    if (state.ui.activityLog.length > 40) state.ui.activityLog.length = 40;
+    renderActivityLog();
+  }
+
+  function formatActivityTimestamp(iso) {
+    const parsed = new Date(iso);
+    if (Number.isNaN(parsed.getTime())) return '';
+    return parsed.toLocaleString('es-CL');
+  }
+
+  function renderActivityLog() {
+    const entries = Array.isArray(state.ui?.activityLog) ? state.ui.activityLog : [];
+    if (refs.activityLogLatest) {
+      refs.activityLogLatest.textContent = entries.length ? entries[0].message : 'Sin actividad reciente';
+    }
+    if (refs.activityLogList) {
+      refs.activityLogList.innerHTML = entries.length
+        ? entries.map((entry) => `
+            <div class="activity-log-entry">
+              <span class="activity-log-entry-msg">${sanitize(entry.message)}</span>
+              <span class="activity-log-entry-at">${sanitize(formatActivityTimestamp(entry.at))}</span>
+            </div>
+          `).join('')
+        : '<div class="activity-log-empty">Sin actividad reciente.</div>';
+    }
   }
 
   function formatBaseStatus(stamp) {
@@ -2787,26 +2825,6 @@ Objetivo
     render();
   }
 
-  function setupLogoInteractions() {
-    const logo = refs.logo3d;
-    const container = refs.logo3dContainer;
-    if (!logo || !container) return;
-
-    logo.setAttribute('rotation-per-second', '90deg');
-
-    container.addEventListener('mouseenter', () => {
-      logo.setAttribute('rotation-per-second', '320deg');
-    });
-
-    container.addEventListener('mouseleave', () => {
-      logo.setAttribute('rotation-per-second', '90deg');
-    });
-
-    container.addEventListener('click', () => {
-      openExternalLink('https://andiworks.cl');
-    });
-  }
-
   function openExternalLink(url) {
     window.open(url, '_blank', 'noopener,noreferrer');
   }
@@ -2835,8 +2853,11 @@ Objetivo
     refs.themeToggleBtn = document.getElementById('theme-toggle-btn');
     refs.aiBriefModal = document.getElementById('ai-brief-modal');
     refs.aiBriefContent = document.getElementById('ai-brief-content');
-    refs.logo3dContainer = document.querySelector('.logo-3d-container');
-    refs.logo3d = document.querySelector('.logo-3d-container model-viewer');
+    refs.activityLogWidget = document.getElementById('activity-log-widget');
+    refs.activityLogLatest = document.getElementById('activity-log-latest');
+    refs.activityLogList = document.getElementById('activity-log-list');
+    refs.calculatorModal = document.getElementById('calculator-modal');
+    refs.calculatorDisplay = document.getElementById('calculator-display');
 
     state.ui.notesWindow = state.ui.notesWindow || { x: null, y: null, width: 210, height: 165 };
     const notesWidth = Number(state.ui.notesWindow.width || 0);
@@ -2870,7 +2891,6 @@ Objetivo
       state.ui.theme = 'light';
     }
 
-    setupLogoInteractions();
     applyTheme(state.ui.theme);
     renderFooterMeta();
     bindEvents();
@@ -2978,6 +2998,12 @@ Objetivo
         return;
       }
 
+      const calcKeyBtn = event.target.closest('[data-calc-digit], [data-calc-op], [data-calc-action]');
+      if (calcKeyBtn) {
+        handleCalculatorKey(calcKeyBtn);
+        return;
+      }
+
       const actionBtn = event.target.closest('[data-action]');
       if (!actionBtn) return;
       const action = actionBtn.dataset.action;
@@ -2997,6 +3023,26 @@ Objetivo
         } else {
           closeNotesModal();
         }
+        return;
+      }
+
+      if (action === 'toggle-activity-log') {
+        const list = refs.activityLogList;
+        const toggleBtn = refs.activityLogWidget?.querySelector('.activity-log-toggle');
+        if (!list) return;
+        const willShow = list.classList.contains('is-hidden');
+        list.classList.toggle('is-hidden', !willShow);
+        toggleBtn?.setAttribute('aria-expanded', String(willShow));
+        return;
+      }
+
+      if (action === 'open-calculator') {
+        openCalculatorModal();
+        return;
+      }
+
+      if (action === 'close-calculator') {
+        closeCalculatorModal();
         return;
       }
 
@@ -3915,7 +3961,8 @@ Objetivo
           activeWorkStartedAt: nowIso,
           workSegments: []
         };
-        stampBaseUpdate('attendance');
+        stampBaseUpdate('attendance', { silent: true });
+        logActivity(`Se inició un turno: ${employee}`);
         window.ERMStorage.save(state);
         render();
         syncAttendanceCommentsInput();
@@ -4020,7 +4067,8 @@ Objetivo
         });
         state.attendance.activeSession = null;
         state.ui.attendanceEditingId = null;
-        stampBaseUpdate('attendance');
+        stampBaseUpdate('attendance', { silent: true });
+        logActivity(`Se cerró el turno: ${activeSession.employeeName}`);
         window.ERMStorage.save(state);
         render();
         syncAttendanceCommentsInput();
@@ -4108,7 +4156,8 @@ Objetivo
 
       if (action === 'save-all-bases-now') {
         const baseKeys = ['scenario', 'database', 'productTypes', 'external', 'contacts', 'orders', 'desired', 'expenses', 'attendance', 'finance'];
-        baseKeys.forEach((key) => stampBaseUpdate(key));
+        baseKeys.forEach((key) => stampBaseUpdate(key, { silent: true }));
+        logActivity('Se guardaron todas las bases de datos');
         triggerSaveFeedback('backup', null);
       }
 
@@ -5435,6 +5484,88 @@ Objetivo
     refs.aiBriefModal.setAttribute('aria-hidden', 'true');
   }
 
+  const calculatorState = { display: '0', storedValue: null, pendingOp: null, awaitingNext: false };
+
+  function openCalculatorModal() {
+    if (!refs.calculatorModal) return;
+    calculatorState.display = '0';
+    calculatorState.storedValue = null;
+    calculatorState.pendingOp = null;
+    calculatorState.awaitingNext = false;
+    renderCalculatorDisplay();
+    refs.calculatorModal.classList.remove('is-hidden');
+    refs.calculatorModal.setAttribute('aria-hidden', 'false');
+  }
+
+  function closeCalculatorModal() {
+    if (!refs.calculatorModal) return;
+    refs.calculatorModal.classList.add('is-hidden');
+    refs.calculatorModal.setAttribute('aria-hidden', 'true');
+  }
+
+  function renderCalculatorDisplay() {
+    if (refs.calculatorDisplay) refs.calculatorDisplay.value = calculatorState.display;
+  }
+
+  function applyCalculatorOperator(a, b, op) {
+    switch (op) {
+      case '+': return a + b;
+      case '-': return a - b;
+      case '*': return a * b;
+      case '/': return b === 0 ? 0 : a / b;
+      default: return b;
+    }
+  }
+
+  function handleCalculatorKey(keyBtn) {
+    const digit = keyBtn.dataset.calcDigit;
+    const op = keyBtn.dataset.calcOp;
+    const action = keyBtn.dataset.calcAction;
+
+    if (digit !== undefined) {
+      if (digit === '.') {
+        if (calculatorState.awaitingNext) {
+          calculatorState.display = '0.';
+          calculatorState.awaitingNext = false;
+        } else if (!calculatorState.display.includes('.')) {
+          calculatorState.display += '.';
+        }
+      } else if (calculatorState.display === '0' || calculatorState.awaitingNext) {
+        calculatorState.display = digit;
+        calculatorState.awaitingNext = false;
+      } else {
+        calculatorState.display += digit;
+      }
+    } else if (op) {
+      const current = Number(calculatorState.display);
+      if (calculatorState.storedValue !== null && !calculatorState.awaitingNext) {
+        calculatorState.storedValue = applyCalculatorOperator(calculatorState.storedValue, current, calculatorState.pendingOp);
+        calculatorState.display = String(calculatorState.storedValue);
+      } else {
+        calculatorState.storedValue = current;
+      }
+      calculatorState.pendingOp = op;
+      calculatorState.awaitingNext = true;
+    } else if (action === 'equals') {
+      if (calculatorState.storedValue !== null && calculatorState.pendingOp) {
+        const current = Number(calculatorState.display);
+        calculatorState.display = String(applyCalculatorOperator(calculatorState.storedValue, current, calculatorState.pendingOp));
+        calculatorState.storedValue = null;
+        calculatorState.pendingOp = null;
+        calculatorState.awaitingNext = true;
+      }
+    } else if (action === 'clear') {
+      calculatorState.display = '0';
+      calculatorState.storedValue = null;
+      calculatorState.pendingOp = null;
+      calculatorState.awaitingNext = false;
+    } else if (action === 'backspace') {
+      calculatorState.display = calculatorState.display.length > 1 ? calculatorState.display.slice(0, -1) : '0';
+    }
+
+    renderCalculatorDisplay();
+  }
+
   async function copyAiBriefToClipboard() {
     try {
       await navigator.clipboard.writeText(AI_PROJECT_CONTEXT_TEXT);
@@ -6098,7 +6229,11 @@ Objetivo
 
     if (state.ui.editingContactId) {
       const current = state.contacts.find((item) => item.id === state.ui.editingContactId);
-      if (current) Object.assign(current, payload);
+      if (current) {
+        const nameChanged = current.name !== payload.name;
+        Object.assign(current, payload);
+        if (nameChanged) syncCustomerNameAcrossOrders(current.id, current.name);
+      }
     } else {
       state.contacts.push({ id: uid('cli'), ...payload });
     }
@@ -6107,6 +6242,17 @@ Objetivo
     state.ui.contactDraft = null;
     stampBaseUpdate('contacts');
     render();
+  }
+
+  function syncCustomerNameAcrossOrders(customerId, newName) {
+    (state.orders || []).forEach((order) => {
+      if (order.customerId !== customerId) return;
+      order.customerName = newName;
+      if (order.quote) order.quote.customerName = newName;
+    });
+    if (state.quote?.customerId === customerId) {
+      state.quote.customerName = newName;
+    }
   }
 
   async function downloadBlobFile(blob, filename) {
@@ -8100,6 +8246,7 @@ Objetivo
     renderSummary(calc);
     renderInlinePdfViewerModal();
     syncAttendanceChronometer();
+    renderActivityLog();
   }
 
   function captureOpenFinanceDetailsState() {
@@ -8991,6 +9138,7 @@ Objetivo
             <h2>Ficha técnica de la orden de trabajo</h2>
           </div>
           <div class="inline-actions action-pair">
+            <button class="btn btn-soft btn-add-line-icon" data-action="open-calculator" title="Calculadora" aria-label="Calculadora">${iconSvg('calculator')}</button>
             <button class="btn btn-soft btn-add-line-icon" data-action="clear-quote-form" title="Limpiar ficha" aria-label="Limpiar ficha">${iconSvg('broom')}</button>
           </div>
         </div>
