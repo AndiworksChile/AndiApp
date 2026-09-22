@@ -26,7 +26,13 @@
   firebase.initializeApp(cfg);
   const auth = firebase.auth();
   const db = firebase.firestore();
-  db.enablePersistence({ synchronizeTabs: true }).catch(() => {});
+  try {
+    db.settings({
+      cache: firebase.firestore.persistentLocalCache({
+        tabManager: firebase.firestore.persistentMultipleTabManager()
+      })
+    });
+  } catch (e) { /* ya inicializado o SDK sin soporte; sigue en memoria */ }
 
   const safeGet = (key) => { try { return localStorage.getItem(key); } catch (e) { return null; } };
   const safeSet = (key, value) => { try { localStorage.setItem(key, value); } catch (e) { console.warn('localStorage no disponible.', e); } };
@@ -279,6 +285,13 @@
   function watchRemoteChanges() {
     manifestRef().onSnapshot((snap) => {
       if (!snap.exists || snap.metadata.hasPendingWrites) return;
+      const branches = snap.data().branches || {};
+      const hasRealChange = Object.keys(branches).some((branch) => {
+        const known = lastPushed[`ref:${branch}`];
+        const incoming = branches[branch];
+        return !known || known.h !== incoming.h || known.n !== incoming.n;
+      });
+      if (!hasRealChange) return;
       if (snap.data().device === deviceId) return;
       if (document.querySelector('.sync-banner')) return;
       const banner = document.createElement('div');

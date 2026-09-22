@@ -2891,6 +2891,10 @@ Objetivo
       state.ui.theme = 'light';
     }
 
+    if (isMobileViewport() && state.currentView !== 'mobile-home') {
+      state.currentView = 'mobile-home';
+    }
+
     applyTheme(state.ui.theme);
     renderFooterMeta();
     bindEvents();
@@ -8295,6 +8299,7 @@ Objetivo
     const preFocusSelEnd   = preFocus?.selectionEnd   ?? null;
     const preFocusValue    = preFocus?.value           ?? null;
 
+    if (state.currentView === 'mobile-home') refs.mainPanel.innerHTML = renderMobileHome();
     if (state.currentView === 'scenario') refs.mainPanel.innerHTML = renderScenario(calc);
     if (state.currentView === 'quote') refs.mainPanel.innerHTML = renderQuote(calc);
     if (state.currentView === 'database') refs.mainPanel.innerHTML = renderDatabase();
@@ -10028,6 +10033,42 @@ Objetivo
         </div>
       ` : ''}
     `;
+  }
+
+  const MOBILE_HOME_SECTIONS = [
+    { view: 'attendance', label: 'Asistencia' },
+    { view: 'quote', label: 'Presupuestador' },
+    { view: 'orders', label: 'Panel OT' },
+    { view: 'expenses', label: 'Gastos' },
+    { view: 'finance', label: 'Finanzas' },
+    { view: 'contacts', label: 'Clientes' },
+    { view: 'database', label: 'Base de datos' },
+    { view: 'inventory', label: 'Inventario' },
+    { view: 'scenario', label: 'Escenario' }
+  ];
+
+  function renderMobileHome() {
+    const buttons = MOBILE_HOME_SECTIONS.map((section, index) => `
+      <button type="button" class="btn mobile-home-btn" data-view="${section.view}">
+        <span class="mobile-home-btn-index">${index + 1}.</span>
+        <span>${section.label}</span>
+      </button>
+    `).join('');
+    return `
+      <div class="card">
+        <div class="section-title">
+          <div>
+            <h2>AndiApp</h2>
+            <p class="subtitle">Selecciona el área a la que quieres ir.</p>
+          </div>
+        </div>
+        <div class="mobile-home-menu">${buttons}</div>
+      </div>
+    `;
+  }
+
+  function isMobileViewport() {
+    return typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(max-width: 780px)').matches;
   }
 
   function renderDocs(calc) {
