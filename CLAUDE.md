@@ -23,10 +23,10 @@ No tests and no linter (`npm test` fails intentionally). Verify by loading local
 
 1. `assets/js/data.js` → `window.ERMDefaults` (initial state shape + demo data)
 2. `assets/js/storage.js` → `window.ERMStorage` (load/save/reset, schema migrations)
-3. `assets/js/calculations.js` → `window.ERMCalculations` (pure math)
-4. `assets/js/app.js` → `window.ERMApp` (~12.5k lines: all tab renderers, event handlers, UI state). Rendered into a single `#main-panel` that is re-rendered on state changes.
+3. `assets/js/calculations.js` → `window.ERMCalc` (pure math; despite the name suggestion elsewhere, the actual global is `ERMCalc`, not `ERMCalculations`)
+4. `assets/js/app.js` (~12.3k lines: all tab renderers, event handlers, UI state) — a closed IIFE, it exposes nothing on `window`. Rendered into a single `#main-panel` that is re-rendered on every state change; `render()` also saves state on every call.
 
-Third-party libs (jspdf, jszip) are under `assets/js/vendor/`.
+Third-party libs (jspdf, jszip) are under `assets/js/vendor/`. `assets/js/sync.js` also creates the fixed session panel (`#session-panel` in `index.html`, hidden until login) showing "Sesión de: Andrés Baeza", "Cerrar Sesión" and "Guardar Bases" (the latter dispatches `data-action="save-all-bases-now"`, handled in app.js's global click listener since it's delegated on `document`, not scoped to `#main-panel`). Per-section green "save check" buttons were removed in favor of this single global save action — don't reintroduce per-tab save buttons; if a tab needs explicit save confirmation, use `triggerSaveFeedback(slotKey, baseKey)` and `renderSaveFeedback(slotKey)` (already used by Gastos' autosave).
 
 State is one object in `localStorage` key `erm-proyecta-state-v1`, with branches: `scenario`, `quote`, `database`, `contacts`, `orders`, `inventory`, `expenses`, `attendance`, `finance`, `ui` (ephemeral flags/drafts/theme).
 
@@ -40,6 +40,6 @@ New field → default in `ERMDefaults` (data.js) **and** normalization/migration
 - Logistics is added to total cost *before* computing the suggested price.
 
 ### Tabs
-Escenario, Presupuestador, Base de datos, Clientes, Panel OT, Inventario, Gastos, Asistencia, Finanzas, Apps, Backup.
+Escenario, Presupuestador, Base de datos, Clientes, Panel OT, Inventario, Gastos, Asistencia, Finanzas, Backup (⤓), Ayuda técnica (?). There is no "Apps" tab in the current codebase.
 
 Before editing, read the relevant render function in app.js and the state slice it touches. Visual changes go in `assets/css/styles.css`.

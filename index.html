@@ -6,7 +6,7 @@
   <title>AndiApp · Costeo y gestión interna</title>
   <meta name="description" content="Plataforma interna para proyectar escenarios, costear trabajos y organizar órdenes de trabajo." />
   <script>
-    window.ERM_APP_VERSION = '1.6.0';
+    window.ERM_APP_VERSION = '2.0.0';
   </script>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -30,6 +30,12 @@
       loading="eager"
       shadow-intensity="0">
     </model-viewer>
+  </div>
+
+  <div id="session-panel" class="session-panel is-hidden" aria-hidden="true">
+    <span class="session-label">Sesión de: Andrés Baeza</span>
+    <button id="session-logout-btn" type="button" class="btn btn-soft session-btn">Cerrar Sesión</button>
+    <button type="button" class="btn btn-soft session-btn" data-action="save-all-bases-now" title="Guarda y confirma que todas las bases quedaron respaldadas">Guardar Bases</button>
   </div>
 
   <div class="app-shell">
@@ -75,7 +81,7 @@
     <footer class="app-footer">
       <span>
         Desarrollado por Andrés Baeza Jordán · <a href="https://andiworks.cl" target="_blank" rel="noopener noreferrer">andiworks.cl</a> / 2026
-        · <strong id="footer-app-version">Versión 0.1.0</strong>
+        · <strong id="footer-app-version">Versión 2.0.0 estable</strong>
       </span>
       <div class="footer-actions">
         <button id="theme-toggle-btn" class="btn btn-soft btn-footer-icon" data-action="toggle-theme" title="Cambiar tema" aria-label="Cambiar tema">◐</button>

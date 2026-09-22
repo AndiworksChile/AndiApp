@@ -67,13 +67,23 @@
     if (badge) return;
     badge = document.createElement('div');
     badge.className = 'sync-badge';
-    badge.innerHTML = '<span>☁ …</span><button type="button">Salir</button>';
-    badge.querySelector('button').addEventListener('click', async () => {
-      if (dirty && !window.confirm('Hay cambios sin sincronizar. ¿Salir de todos modos?')) return;
-      await auth.signOut();
-      window.location.reload();
-    });
+    badge.innerHTML = '<span>☁ …</span>';
     document.body.appendChild(badge);
+  };
+
+  const signOutSession = async () => {
+    if (dirty && !window.confirm('Hay cambios sin sincronizar. ¿Cerrar sesión de todos modos?')) return;
+    await auth.signOut();
+    window.location.reload();
+  };
+
+  const revealSessionPanel = () => {
+    const panel = document.getElementById('session-panel');
+    if (!panel) return;
+    panel.classList.remove('is-hidden');
+    panel.setAttribute('aria-hidden', 'false');
+    const logoutBtn = document.getElementById('session-logout-btn');
+    if (logoutBtn) logoutBtn.addEventListener('click', signOutSession);
   };
 
   function showLogin() {
@@ -82,6 +92,7 @@
       overlay.className = 'sync-login';
       overlay.innerHTML = `
         <form>
+          <model-viewer src="assets/logotesta.glb" alt="Logo AndiWorks 3D" auto-rotate rotation-per-second="90deg" camera-orbit="0deg 90deg 105%" field-of-view="1deg" min-field-of-view="1deg" max-field-of-view="1deg" disable-zoom disable-pan interaction-prompt="none" loading="eager" shadow-intensity="0" style="width:110px;height:110px;margin:0 auto 6px;display:block;"></model-viewer>
           <h2>AndiApp</h2>
           <input type="email" name="email" placeholder="Correo" autocomplete="username" required />
           <input type="password" name="password" placeholder="Contraseña" autocomplete="current-password" required />
@@ -320,6 +331,7 @@
 
     hideLoading();
     ensureBadge();
+    revealSessionPanel();
     setStatus('☁ Sincronizado');
     watchRemoteChanges();
     startApp();

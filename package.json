@@ -1,6 +1,6 @@
 {
   "name": "andiapp",
-  "version": "1.7.0",
+  "version": "2.0.0",
   "description": "AndiApp: plataforma web interna de escenarios, costeo y gestión de OT.",
   "scripts": {
     "dev:web": "serve -l 1420 .",

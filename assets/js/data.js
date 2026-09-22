@@ -68,6 +68,7 @@ window.ERMDefaults = (() => {
       selectedOrderId: null,
       editingOrderId: null,
       orderFilter: 'Todas',
+      orderSortByNumber: false,
       scenarioLocked: false,
       lastScenarioSavedAt: null,
       baseScenarioUpdatedAt: null,

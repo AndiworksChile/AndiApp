@@ -205,10 +205,6 @@ window.ERMCalc = (() => {
     }
   }
 
-  function logisticsCost(logistics) {
-    return logisticsSummary(logistics).total;
-  }
-
   function priceTargetStatus(price, minimumNet, idealNet) {
     const current = roundMoney(price);
     if (current < roundMoney(minimumNet)) {

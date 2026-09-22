@@ -1,7 +1,7 @@
 (() => {
   const state = window.ERMStorage.load();
   const refs = {};
-  const APP_VERSION = String(window.ERM_APP_VERSION || '1.2.0');
+  const APP_VERSION = String(window.ERM_APP_VERSION || '2.0.0');
   let notesAutoSaveTimer = null;
   let notesDragState = null;
   let attendanceChronoTimer = null;
@@ -623,12 +623,9 @@ Objetivo
   <style>
     *{box-sizing:border-box;margin:0;padding:0;}
     body{font-family:Arial,Helvetica,sans-serif;font-size:10pt;color:#111;background:#fff;}
-                  <option value="Landmark" ${String(form.type).toLowerCase() === 'landmark' ? 'selected' : ''}>Landmark</option>
     h2{font-size:12pt;font-weight:700;border-bottom:2px solid #e5e7eb;padding-bottom:4px;margin-bottom:12px;color:#111;}
     .section{margin-bottom:22px;}
     table{width:100%;border-collapse:collapse;margin-bottom:0;font-size:9pt;}
-                <label>Valor hora ${String(form.type).toLowerCase() === 'landmark' ? '(opcional)' : ''}</label>
-                <input type="text" data-format="clp" min="0" step="1" data-external-resource-draft="hourlyRate" value="${formatNumber(form.hourlyRate || 0)}" ${String(form.type).toLowerCase() === 'landmark' ? 'disabled' : ''} />
     .chart-row{display:grid;grid-template-columns:3fr 2fr;gap:16px;align-items:start;}
     .iva-row{display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid #f3f4f6;font-size:9pt;}
     .iva-total{display:flex;justify-content:space-between;padding:6px 0 0;font-weight:700;border-top:2px solid #d1d5db;margin-top:4px;font-size:10pt;}
@@ -2766,10 +2763,6 @@ Objetivo
     return `<span class="save-feedback ${cls}">${sanitize(payload.message || '')}</span>`;
   }
 
-  function renderUnifiedSaveButton(action) {
-    return `<button class="btn btn-soft save-check-button save-check-unified" data-action="${sanitize(action)}" title="Guardar" aria-label="Guardar"><svg class="save-check-icon" viewBox="0 0 16 16" role="img" aria-hidden="true"><path d="M2 1h9.293L14 3.707V15H2V1zm1 1v12h10V4.414L10.586 2H3zm2 0h4v3H5V2zm0 6h6v5H5V8z"/></svg></button>`;
-  }
-
   function triggerSaveFeedback(slotKey, baseKey) {
     state.ui.saveFeedbackMap = state.ui.saveFeedbackMap || {};
     try {
@@ -3149,12 +3142,6 @@ Objetivo
         if (state.ui.inlinePdfViewer?.sourceType === 'expense' && state.ui.inlinePdfViewer?.sourceId === entryId) {
           state.ui.inlinePdfViewer = null;
         }
-        const targetEntry = (draft.entries || []).find((entry) => entry.id === entryId);
-        if (targetEntry) {
-          const currentAttachment = getPrimaryAttachment(targetEntry, legacyExpenseAttachment);
-          if (currentAttachment) {
-          }
-        }
         draft.entries = (draft.entries || []).map((entry) => {
           if (entry.id !== entryId) return entry;
           return {
@@ -3233,9 +3220,6 @@ Objetivo
 
       if (action === 'clear-herramienta-pdf') {
         if (!state.ui.financeDraft) return;
-        const currentAttachment = getPrimaryAttachment(state.ui.financeDraft, legacyFinanceAttachment);
-        if (currentAttachment) {
-        }
         state.ui.financeDraft.attachments = [];
         state.ui.financeDraft.pdfDataUrl = '';
         state.ui.financeDraft.pdfName = '';
@@ -3692,6 +3676,11 @@ Objetivo
         render();
       }
 
+      if (action === 'toggle-order-sort') {
+        state.ui.orderSortByNumber = !state.ui.orderSortByNumber;
+        render();
+      }
+
       if (action === 'open-order-card') {
         state.ui.selectedOrderId = actionBtn.dataset.id || null;
         state.currentView = 'orders';
@@ -4115,22 +4104,6 @@ Objetivo
         window.ERMStorage.save(state);
         render();
         return;
-      }
-
-      if (action === 'check-save-database') {
-        triggerSaveFeedback('database', 'database');
-      }
-
-      if (action === 'check-save-contacts') {
-        triggerSaveFeedback('contacts', 'contacts');
-      }
-
-      if (action === 'check-save-inventory') {
-        triggerSaveFeedback('inventory', 'desired');
-      }
-
-      if (action === 'check-save-expenses') {
-        triggerSaveFeedback('expenses', 'expenses');
       }
 
       if (action === 'save-all-bases-now') {
@@ -5046,6 +5019,21 @@ Objetivo
         if (key === 'baseYear') {
           value = String(value || '').replace(/[^0-9]/g, '').slice(0, 4);
         }
+        if (key === 'period') {
+          const currentEntries = Array.isArray(state.ui.expenseDraft.entries) ? state.ui.expenseDraft.entries : [];
+          const entriesToDrop = currentEntries.slice(getExpenseEntryCount(value));
+          const wouldLoseData = entriesToDrop.some((entry) => (
+            Number(entry?.amount || 0) > 0 ||
+            entry?.status === 'pagado' ||
+            String(entry?.notes || '').trim() ||
+            (Array.isArray(entry?.attachments) && entry.attachments.length > 0) ||
+            entry?.pdfDataUrl
+          ));
+          if (wouldLoseData && !window.confirm(`Cambiar el período descartará ${entriesToDrop.length} cuota(s) que ya tienen montos, comprobantes o estado de pago cargados. ¿Deseas continuar?`)) {
+            render();
+            return;
+          }
+        }
         state.ui.expenseDraft[key] = value;
         if (key === 'period') {
           state.ui.expenseDraft.entries = normalizeExpenseEntries(state.ui.expenseDraft.entries, value);
@@ -5900,6 +5888,8 @@ Objetivo
       exportedAt: new Date().toISOString(),
       finance: {
         initialBalance: state.finance?.initialBalance || 0,
+        ivaCreditBalance: state.finance?.ivaCreditBalance || 0,
+        ivaCreditBalanceLocked: Boolean(state.finance?.ivaCreditBalanceLocked),
         entries: state.finance?.entries || [],
         quickOutflowTypes: getFinanceQuickOutflowTypes()
       }
@@ -5918,6 +5908,12 @@ Objetivo
       }
       state.finance = state.finance || { initialBalance: 0, entries: [] };
       state.finance.initialBalance = Math.max(0, Number(finance.initialBalance || 0) || 0);
+      if (finance.ivaCreditBalance !== undefined) {
+        state.finance.ivaCreditBalance = Math.max(0, Number(finance.ivaCreditBalance || 0) || 0);
+      }
+      if (finance.ivaCreditBalanceLocked !== undefined) {
+        state.finance.ivaCreditBalanceLocked = Boolean(finance.ivaCreditBalanceLocked);
+      }
       state.finance.entries = (Array.isArray(finance.entries) ? finance.entries : []).map((entry) => createFinanceEntry(entry));
       state.ui.financeQuickOutflowTypes = Array.isArray(finance.quickOutflowTypes)
         ? finance.quickOutflowTypes.map((t) => String(t || '').trim()).filter(Boolean)
@@ -7092,6 +7088,8 @@ Objetivo
           exportedAt,
           finance: {
             initialBalance: state.finance?.initialBalance || 0,
+            ivaCreditBalance: state.finance?.ivaCreditBalance || 0,
+            ivaCreditBalanceLocked: Boolean(state.finance?.ivaCreditBalanceLocked),
             entries: state.finance?.entries || []
           }
         }
@@ -7241,6 +7239,8 @@ Objetivo
             exportedAt,
             finance: {
               initialBalance: state.finance?.initialBalance || 0,
+              ivaCreditBalance: state.finance?.ivaCreditBalance || 0,
+              ivaCreditBalanceLocked: Boolean(state.finance?.ivaCreditBalanceLocked),
               entries: state.finance?.entries || []
             }
           }
@@ -7657,6 +7657,12 @@ Objetivo
         const sourceFinance = parsed.finance;
         state.finance = state.finance || { initialBalance: 0, entries: [] };
         state.finance.initialBalance = Math.max(0, Number(sourceFinance.initialBalance || 0) || 0);
+        if (sourceFinance.ivaCreditBalance !== undefined) {
+          state.finance.ivaCreditBalance = Math.max(0, Number(sourceFinance.ivaCreditBalance || 0) || 0);
+        }
+        if (sourceFinance.ivaCreditBalanceLocked !== undefined) {
+          state.finance.ivaCreditBalanceLocked = Boolean(sourceFinance.ivaCreditBalanceLocked);
+        }
         state.finance.entries = (Array.isArray(sourceFinance.entries) ? sourceFinance.entries : []).map((entry) => createFinanceEntry(entry));
         state.ui.editingFinanceId = null;
         state.ui.financeDraft = null;
@@ -9586,10 +9592,6 @@ Objetivo
             <h2>Ficha de Cliente nuevo</h2>
             <p class="subtitle">Registra tus clientes para reutilizar su información más adelante en despachos, envíos y órdenes de trabajo.</p>
           </div>
-          <div class="inline-actions save-inline-actions">
-            ${renderUnifiedSaveButton('check-save-contacts')}
-            ${renderSaveFeedback('contacts')}
-          </div>
         </div>
 
         <div class="database-form-layout">
@@ -9727,6 +9729,11 @@ Objetivo
       return item.status === filter;
     });
 
+    const sortByOrderNumber = Boolean(state.ui.orderSortByNumber);
+    if (sortByOrderNumber) {
+      visibleOrders.sort((a, b) => String(a.orderNumber || '').localeCompare(String(b.orderNumber || ''), undefined, { numeric: true, sensitivity: 'base' }));
+    }
+
     const filterButtons = [
       { key: 'Todas', label: 'Todas' },
       { key: 'Entregadas', label: 'Entregadas' },
@@ -9782,6 +9789,7 @@ Objetivo
             <p class="subtitle">Aquí puedes ver las órdenes guardadas en el sistema y reabrirlas para edición cuando lo necesites.</p>
           </div>
           <div class="inline-actions">
+            <button class="btn btn-soft ${sortByOrderNumber ? 'active' : ''}" data-action="toggle-order-sort" title="Ordenar las OT por número de orden">${sortByOrderNumber ? '✓ ' : ''}Ordenar por N° OT</button>
             <span class="pill ok">${(state.orders || []).length} OT</span>
           </div>
         </div>
@@ -9973,11 +9981,8 @@ Objetivo
         <div class="section-title">
           <div>
             <h2>Central de respaldo</h2>
-            <p class="subtitle">Controla importación y descarga de todas las bases de la app en un solo lugar.</p>
+            <p class="subtitle">Controla importación y descarga de todas las bases de la app en un solo lugar. Usa "Guardar Bases" en la parte superior para asegurar el respaldo de todas las bases.</p>
             ${renderSaveFeedback('backup')}
-          </div>
-          <div class="inline-actions">
-            ${renderUnifiedSaveButton('save-all-bases-now')}
           </div>
         </div>
 
@@ -11361,10 +11366,6 @@ Objetivo
             <h2>Módulo 6 · Inventario</h2>
             <p class="subtitle">Registro del inventario completo del galpón: equipos, herramientas y activos.</p>
           </div>
-          <div class="inline-actions save-inline-actions">
-            ${renderUnifiedSaveButton('check-save-inventory')}
-            ${renderSaveFeedback('inventory')}
-          </div>
         </div>
       </div>
 
@@ -11482,7 +11483,6 @@ Objetivo
             <p class="subtitle">Control anual de gastos clave con respaldo de comprobantes PDF por fila.</p>
           </div>
           <div class="inline-actions save-inline-actions">
-            ${renderUnifiedSaveButton('check-save-expenses')}
             <button class="btn btn-primary btn-add-line-icon" data-action="add-expense-card" title="Nueva card" aria-label="Nueva card">${iconSvg('plus')}</button>
             <span class="pill ok">${(state.expenses.cards || []).length} cards</span>
             ${renderSaveFeedback('expenses')}
@@ -11770,10 +11770,6 @@ Objetivo
           <div>
             <h2>Módulo 3 · Base de datos</h2>
             <p class="subtitle">Administra tu base principal y sus subbases conectadas al presupuestador.</p>
-          </div>
-          <div class="inline-actions save-inline-actions">
-            ${renderUnifiedSaveButton('check-save-database')}
-            ${renderSaveFeedback('database')}
           </div>
         </div>
         <div class="filter-row">
