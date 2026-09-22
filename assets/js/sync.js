@@ -30,7 +30,8 @@
     db.settings({
       cache: firebase.firestore.persistentLocalCache({
         tabManager: firebase.firestore.persistentMultipleTabManager()
-      })
+      }),
+      experimentalAutoDetectLongPolling: true
     });
   } catch (e) { /* ya inicializado o SDK sin soporte; sigue en memoria */ }
 

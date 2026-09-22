@@ -1,0 +1,75 @@
+================================================================================
+                    ARCHIVO LISTO PARA DESCARGAR
+================================================================================
+
+NOMBRE DEL ARCHIVO:
+  AndiApp_1.3.1_aarch64.dmg
+
+UBICACIÓN EXACTA:
+  /Users/andresbaeza/Desktop/AndiWorks 2026/Programacion/ERM/app/src-tauri/target/release/bundle/dmg/AndiApp_1.3.1_aarch64.dmg
+
+TAMAÑO:
+  3.4 MB
+
+VERSIÓN:
+  1.3.1
+
+ARQUITECTURA:
+  ARM64 (Apple Silicon - M1/M2/M3/M4)
+
+FECHA DE CREACIÓN:
+  22 de Junio, 2026
+
+================================================================================
+                       INSTRUCCIONES DE INSTALACIÓN
+================================================================================
+
+1. LOCALIZAR EL ARCHIVO
+   - Abre Finder
+   - Navega a: Desktop/AndiWorks 2026/Programacion/ERM/app/src-tauri/target/release/bundle/dmg/
+   - O usa Terminal: cd "/Users/andresbaeza/Desktop/AndiWorks 2026/Programacion/ERM/app/src-tauri/target/release/bundle/dmg/"
+
+2. INSTALAR
+   - Doble clic en AndiApp_1.3.1_aarch64.dmg
+   - Arrastra AndiApp.app a Applications
+   - Espera a que termine
+   - Expulsa la imagen
+
+3. EJECUTAR
+   - Abre Spotlight (Cmd + Space)
+   - Escribe "AndiApp"
+   - Presiona Enter
+
+================================================================================
+                            VERIFICACIÓN
+================================================================================
+
+Para verificar que todo funciona:
+  1. Abre AndiApp
+  2. Ve a módulo "Asistencia"
+  3. Escribe un comentario
+  4. Marca entrada
+  5. Edita el comentario
+  6. Marca salida
+  7. Verifica que el comentario se haya guardado ✅
+
+Si el comentario se guardó correctamente, ¡la instalación es exitosa!
+
+================================================================================
+                         DOCUMENTACIÓN
+================================================================================
+
+CHANGELOG:        CHANGELOG_SESION_JUNIO22_2026.md
+INSTALACIÓN:      INSTALACION_BUILD_JUNIO22.md
+RESUMEN FINAL:    RESUMEN_SESION_FINAL.md
+
+================================================================================
+                      CONTACTO Y SOPORTE
+================================================================================
+
+Email:     abaezajordan@gmail.com
+Versión:   1.3.1
+Proyecto:  AndiApp - ERM Proyecta
+Estado:    ✅ Listo para Producción
+
+================================================================================

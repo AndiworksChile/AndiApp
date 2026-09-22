@@ -1,0 +1,26 @@
+Estoy en Windows 10/11, en VS Code, dentro del proyecto AndiApp.
+
+Necesito que ejecutes el build final para Windows usando MSVC y dejes el artefacto final etiquetado como version estable.
+
+Objetivo:
+1) Validar toolchain de Windows para Rust + Tauri.
+2) Ejecutar build para target x86_64-pc-windows-msvc.
+3) Confirmar ruta de salida del .msi/.exe.
+4) Renombrar el artefacto final a:
+   - AndiApp_1.1.0_estable_Windows10_x64.msi
+   o
+   - AndiApp_1.1.0_estable_Windows10_x64.exe
+5) Mostrar resumen final con:
+   - comandos ejecutados
+   - resultado del build
+   - ruta exacta del archivo final
+
+Instrucciones de ejecucion:
+- Ejecuta en este orden:
+  npm install
+  rustup target add x86_64-pc-windows-msvc
+  npm run tauri:build -- --target x86_64-pc-windows-msvc
+
+- Si falta algun requisito (MSVC/Windows SDK/llvm tools), detectalo y dame el comando o paso exacto para corregirlo.
+- No hagas cambios innecesarios de codigo.
+- Si el build falla, corrige el problema y reintenta hasta dejar un artefacto final valido.

@@ -1,0 +1,364 @@
+{
+  "appName": "ERM Proyecta",
+  "exportedAt": "2026-04-20T04:20:13.044Z",
+  "order": {
+    "orderTitle": "Stand QR La Ronda personalizado",
+    "customerId": "cli-u9ydhtg",
+    "customerName": "Constanza La Ronda",
+    "productName": "Stand QR 2.0",
+    "quoteDate": "2026-04-18",
+    "orderNumber": "OT-001",
+    "status": "Aceptado",
+    "deliveryState": "Abierta",
+    "description": "",
+    "selectedPriceMode": "custom",
+    "selectedPriceNet": 38606.4,
+    "customPriceGross": 110000,
+    "materials": [
+      {
+        "id": "qlm-5zr3eds",
+        "group": "Acrílicos",
+        "materialId": "mat-eouuc7y",
+        "quantity": 2400,
+        "wastePercent": 10
+      },
+      {
+        "id": "qlm-8dxw1tj",
+        "group": "Terminaciones",
+        "materialId": "mat-af8jley",
+        "quantity": 1,
+        "wastePercent": 0
+      },
+      {
+        "id": "qlm-lcvwp6k",
+        "group": "Servicio",
+        "materialId": "mat-7pwy8vp",
+        "quantity": 200,
+        "wastePercent": 0
+      },
+      {
+        "id": "qlm-ijoee2i",
+        "group": "Acrílicos",
+        "materialId": "mat-tkga7wg",
+        "quantity": 1400,
+        "wastePercent": 0
+      }
+    ],
+    "labor": [
+      {
+        "id": "qll-2lgb2i9",
+        "employeeId": "emp-w2nopt4",
+        "assignmentType": "hora",
+        "hours": 4,
+        "rate": 5000,
+        "directLabel": "",
+        "directCost": 0
+      }
+    ],
+    "logistics": {
+      "mode": "retiro",
+      "metroStation": "El Llano",
+      "passageCost": 1500,
+      "deliveryHours": 0.5,
+      "deliveryHourRate": 7143,
+      "distanceKm": 20,
+      "fuelEfficiencyKmL": 14,
+      "fuelPricePerLiter": 1300,
+      "tollCost": 0,
+      "parkingCost": 0,
+      "packingCost": 0,
+      "externalCarrierCost": 0,
+      "extraCost": 0,
+      "recipientName": "Constanza La Ronda",
+      "recipientRut": "",
+      "recipientEmail": "",
+      "recipientPhone": "+569 8160 8785",
+      "address": "Llano Subercaseaux 3255",
+      "district": "San Miguel",
+      "notes": "a falta de confirmación de la Estación de Metro"
+    }
+  },
+  "quoteSummary": {
+    "materialLines": [
+      {
+        "id": "qlm-5zr3eds",
+        "group": "Acrílicos",
+        "materialId": "mat-eouuc7y",
+        "quantity": 2400,
+        "wastePercent": 0.1,
+        "material": {
+          "id": "mat-eouuc7y",
+          "group": "Acrílicos",
+          "name": "Acrílico Transparente 3mm",
+          "calculationUnit": "cm2",
+          "baseCost": 42840,
+          "unitCost": 1.9833333333333334,
+          "unit": "cm²",
+          "notes": "Horario de atención 9am - 1pm a 2pm - 6pm\nPrecio con IVA Incluido",
+          "provider": "Acrimar",
+          "supplierAddress": "Ñuble 454, Santiago",
+          "supplierContact": "+569 8457 9442",
+          "status": "Activo",
+          "formulaSummary": "Plancha de 120 × 180 cm = 21600 cm² útiles.",
+          "createdAt": "16-04-2026",
+          "widthCm": 120,
+          "heightCm": 180,
+          "yieldQuantity": 0,
+          "yieldUnit": "m²",
+          "imageDataUrl": "",
+          "imageName": "",
+          "imageMimeType": "",
+          "imageSizeKb": 0
+        },
+        "unitCost": 1.9833333333333334,
+        "effectiveQuantity": 2640,
+        "baseLineTotal": 4760,
+        "wasteAmount": 476,
+        "lineTotal": 5236
+      },
+      {
+        "id": "qlm-8dxw1tj",
+        "group": "Terminaciones",
+        "materialId": "mat-af8jley",
+        "quantity": 1,
+        "wastePercent": 0,
+        "material": {
+          "id": "mat-af8jley",
+          "group": "Terminaciones",
+          "name": "Lápiz POSCA acrílico Color General",
+          "calculationUnit": "unidad",
+          "baseCost": 6500,
+          "unitCost": 6500,
+          "unit": "unidad",
+          "notes": "Por el momento se considera un valor estimado, referenciado en un Lápiz POSCA punta \"8k\" encontrado en Internet.",
+          "provider": "Sin definir",
+          "supplierAddress": "Sin definir",
+          "supplierContact": "Sin definir",
+          "status": "Activo",
+          "formulaSummary": "El costo ingresado se considera directamente como valor por unidad.",
+          "createdAt": "19-04-2026",
+          "widthCm": 0,
+          "heightCm": 0,
+          "yieldQuantity": 0,
+          "yieldUnit": "m²",
+          "imageDataUrl": "",
+          "imageName": "",
+          "imageMimeType": "",
+          "imageSizeKb": 0
+        },
+        "unitCost": 6500,
+        "effectiveQuantity": 1,
+        "baseLineTotal": 6500,
+        "wasteAmount": 0,
+        "lineTotal": 6500
+      },
+      {
+        "id": "qlm-lcvwp6k",
+        "group": "Servicio",
+        "materialId": "mat-7pwy8vp",
+        "quantity": 200,
+        "wastePercent": 0,
+        "material": {
+          "id": "mat-7pwy8vp",
+          "group": "Servicio",
+          "name": "Corte y grabado láser (Agregar valor)",
+          "calculationUnit": "min",
+          "baseCost": 150,
+          "unitCost": 150,
+          "unit": "min",
+          "notes": "",
+          "provider": "Andiworks",
+          "supplierAddress": "",
+          "supplierContact": "",
+          "status": "Activo",
+          "formulaSummary": "El costo ingresado se considera directamente como valor por minuto.",
+          "createdAt": "20-04-2026",
+          "widthCm": 0,
+          "heightCm": 0,
+          "yieldQuantity": 0,
+          "yieldUnit": "m²",
+          "imageDataUrl": "",
+          "imageName": "",
+          "imageMimeType": "",
+          "imageSizeKb": 0
+        },
+        "unitCost": 150,
+        "effectiveQuantity": 200,
+        "baseLineTotal": 30000,
+        "wasteAmount": 0,
+        "lineTotal": 30000
+      },
+      {
+        "id": "qlm-ijoee2i",
+        "group": "Acrílicos",
+        "materialId": "mat-tkga7wg",
+        "quantity": 1400,
+        "wastePercent": 0,
+        "material": {
+          "id": "mat-tkga7wg",
+          "group": "Acrílicos",
+          "name": "Acrílico Negro 3mm",
+          "calculationUnit": "cm2",
+          "baseCost": 44982,
+          "unitCost": 2.0825,
+          "unit": "cm²",
+          "notes": "Horario de atención 9am - 1pm a 2pm - 6pm\nPrecio con IVA Incluido",
+          "provider": "Acrimar",
+          "supplierAddress": "Ñuble 454, Santiago",
+          "supplierContact": "+569 8457 9442",
+          "status": "Activo",
+          "formulaSummary": "Plancha de 120 × 180 cm = 21600 cm² útiles.",
+          "createdAt": "16-04-2026",
+          "widthCm": 120,
+          "heightCm": 180,
+          "yieldQuantity": 0,
+          "yieldUnit": "m²",
+          "imageDataUrl": "",
+          "imageName": "",
+          "imageMimeType": "",
+          "imageSizeKb": 0
+        },
+        "unitCost": 2.0825,
+        "effectiveQuantity": 1400,
+        "baseLineTotal": 2915.5,
+        "wasteAmount": 0,
+        "lineTotal": 2915.5
+      }
+    ],
+    "laborLines": [
+      {
+        "id": "qll-2lgb2i9",
+        "employeeId": "emp-w2nopt4",
+        "assignmentType": "hora",
+        "hours": 4,
+        "rate": 5000,
+        "directLabel": "",
+        "directCost": 0,
+        "employee": {
+          "id": "emp-w2nopt4",
+          "name": "Andrés",
+          "hourlyRate": 5000,
+          "hoursPerMonth": 160
+        },
+        "realRate": 7142.86,
+        "efficiencyApplied": 0.7,
+        "lineTotal": 28571.44
+      }
+    ],
+    "materialsTotal": 44651.5,
+    "laborTotal": 28571.44,
+    "totalLaborHours": 4,
+    "cifTotal": 16350.44,
+    "internalCost": 89573.38,
+    "logisticsBreakdown": {
+      "mode": "retiro",
+      "total": 0,
+      "formula": "Sin costo logístico"
+    },
+    "logisticsTotal": 0,
+    "totalCost": 89573.38,
+    "breakEvenNet": 89573.38,
+    "targetProfitPerOrder": 26780.93,
+    "targetUtilityNet": 116354.31,
+    "minimumNet": 137805.2,
+    "idealNet": 199051.96,
+    "selectedPriceMode": "custom",
+    "customNet": 92436.97,
+    "customGross": 110000,
+    "customIvaAmount": 17563.03,
+    "effectiveNet": 92436.97,
+    "minimumGross": 163988.19,
+    "idealGross": 236871.83,
+    "effectiveGross": 110000,
+    "contribution": 2863.59,
+    "realMargin": 0.03097883887799438,
+    "marginStatus": "bajo",
+    "selectedStatus": {
+      "key": "below",
+      "text": "Bajo las metas definidas",
+      "description": "La utilidad queda por debajo del mínimo esperado y demasiado cerca del costo real.",
+      "tone": "warn"
+    },
+    "averageSaleSignal": {
+      "level": "breakEven",
+      "text": "Cubre el valor promedio de equilibrio por orden"
+    }
+  },
+  "scenarioSnapshot": {
+    "periodMonths": 1,
+    "efficiency": 0.7,
+    "ivaRate": 0.19,
+    "minimumMargin": 0.35,
+    "idealMargin": 0.55,
+    "fixedCosts": [
+      {
+        "id": "fc-20a3x2w",
+        "name": "Arriendo taller",
+        "periodicity": "mensual",
+        "amount": 300000
+      },
+      {
+        "id": "fc-xsw8e2j",
+        "name": "Internet",
+        "periodicity": "mensual",
+        "amount": 17990
+      },
+      {
+        "id": "fc-9oflnsi",
+        "name": "Electricidad",
+        "periodicity": "mensual",
+        "amount": 40000
+      },
+      {
+        "id": "fc-g516o0q",
+        "name": "Agua",
+        "periodicity": "mensual",
+        "amount": 30000
+      },
+      {
+        "id": "fc-x5jc77u",
+        "name": "IA Copilot",
+        "periodicity": "mensual",
+        "amount": 8990
+      },
+      {
+        "id": "fc-stfd3pv",
+        "name": "Dominio Web",
+        "periodicity": "anual",
+        "amount": 9990
+      },
+      {
+        "id": "fc-62w6z1j",
+        "name": "Deterioro y mantención de herramientas",
+        "periodicity": "anual",
+        "amount": 300000
+      },
+      {
+        "id": "fc-d3t6szm",
+        "name": "Consumibles no trazados",
+        "periodicity": "mensual",
+        "amount": 20000
+      },
+      {
+        "id": "fc-3omqk0i",
+        "name": "Limpieza y orden",
+        "periodicity": "mensual",
+        "amount": 15000
+      }
+    ],
+    "employees": [
+      {
+        "id": "emp-w2nopt4",
+        "name": "Andrés",
+        "hourlyRate": 5000,
+        "hoursPerMonth": 160
+      }
+    ],
+    "projection": {
+      "plannedDirectCosts": 300000,
+      "averageAdvanceRate": 0.5,
+      "avgHoursPerOrder": 6,
+      "targetMonthlyProfit": 500000
+    }
+  }
+}
