@@ -4,7 +4,7 @@
   "description": "AndiApp: plataforma web interna de escenarios, costeo y gestión de OT.",
   "scripts": {
     "dev:web": "serve -l 1420 .",
-    "build:web": "shx rm -rf dist && shx mkdir -p dist && shx cp -r index.html assets dist/"
+    "build:web": "shx rm -rf dist && shx mkdir -p dist && shx cp -r index.html manifest.json assets dist/"
   },
   "keywords": [],
   "author": "",
