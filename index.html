@@ -142,6 +142,26 @@
     </div>
   </div>
 
+  <script>
+    (function () {
+      var footer = document.querySelector('.app-footer');
+      if (!footer) return;
+
+      function updateClearance() {
+        var height = footer.getBoundingClientRect().height;
+        document.documentElement.style.setProperty('--footer-clearance', (height + 24) + 'px');
+      }
+      updateClearance();
+      if ('ResizeObserver' in window) new ResizeObserver(updateClearance).observe(footer);
+      window.addEventListener('resize', updateClearance);
+
+      if ('IntersectionObserver' in window) {
+        new IntersectionObserver(function (entries) {
+          document.body.classList.toggle('footer-in-view', entries[0].isIntersecting);
+        }, { threshold: 0 }).observe(footer);
+      }
+    })();
+  </script>
   <script src="assets/js/data.js"></script>
   <script src="assets/js/storage.js"></script>
   <script src="assets/js/calculations.js"></script>

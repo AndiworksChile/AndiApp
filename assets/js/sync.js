@@ -49,14 +49,14 @@
   style.textContent = `
     .sync-login{position:fixed;inset:0;z-index:5000;display:flex;align-items:center;justify-content:center;background:var(--bg,#f4f5f7);padding:16px}
     .sync-login-stack{width:min(360px,100%);display:flex;flex-direction:column;align-items:center;gap:12px}
-    .sync-login-stack model-viewer{width:110px;height:110px;display:block}
+    .sync-login-stack model-viewer{width:220px;height:220px;display:block}
     .sync-login form{width:100%;background:var(--panel,#fff);border:var(--border,1px solid #d5d8de);border-radius:6px;padding:22px;display:flex;flex-direction:column;gap:10px;color:var(--ink,#1c1f26);font-family:inherit}
     .sync-login h2{margin:0 0 4px;font-size:20px}
     .sync-login input{padding:9px 10px;border:var(--border,1px solid #d5d8de);border-radius:4px;font:inherit;background:var(--panel-soft,#fff);color:inherit}
     .sync-login button{padding:10px;border:0;border-radius:4px;background:var(--brand,#2563eb);color:#fff;font:inherit;cursor:pointer}
     .sync-login button:disabled{opacity:.6;cursor:wait}
     .sync-login .sync-error{color:#c62828;font-size:13px;min-height:16px}
-    .sync-badge{position:fixed;left:10px;bottom:10px;z-index:4000;display:flex;gap:8px;align-items:center;padding:4px 10px;font-size:12px;border-radius:14px;background:var(--panel,#fff);border:var(--border,1px solid #d5d8de);color:var(--ink,#1c1f26)}
+    .sync-badge{position:fixed;left:10px;bottom:10px;z-index:4000;display:flex;gap:8px;align-items:center;padding:4px 10px;font-size:12px;border-radius:14px;background:var(--panel,#fff);border:var(--border,1px solid #d5d8de);color:var(--ink,#1c1f26);transition:bottom .15s ease}
     .sync-badge button{border:0;background:none;color:var(--brand,#2563eb);cursor:pointer;font:inherit;padding:0}
     .sync-banner{position:fixed;top:0;left:0;right:0;z-index:5000;padding:8px 14px;text-align:center;font-size:13px;background:#fff3cd;color:#5c4400}
     .sync-banner button{margin-left:8px}

@@ -467,12 +467,16 @@ label {
 /* ─── NAVIGATION ─── */
 .nav-tabs {
   display: flex;
-  gap: 6px;
-  flex-wrap: wrap;
+  gap: 5px;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  overflow-y: hidden;
   margin-bottom: 16px;
   align-items: center;
-  padding-right: 270px;
+  padding-right: 190px;
+  padding-bottom: 2px;
 }
+.nav-tabs .tab { flex: 0 0 auto; padding: 7px 10px; letter-spacing: 0.12em; }
 
 .tab, .btn {
   border: 1px solid var(--line);
@@ -502,6 +506,19 @@ label {
   font-weight: 700;
   box-shadow: none;
   transform: none;
+}
+
+/* Colores invertidos para que los botones de sección se noten más contra el fondo,
+   usando un tono distinto al de --accent para que la pestaña activa siga resaltando. */
+.nav-tabs .tab:not(.active):not(.tab-help):not(.tab-download-all) {
+  background: var(--line-strong);
+  border-color: var(--line-strong);
+  color: var(--ink);
+}
+.nav-tabs .tab:not(.active):not(.tab-help):not(.tab-download-all):hover {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #ffffff;
 }
 
 .btn-soft {
@@ -629,7 +646,7 @@ input[type="range"]:focus { outline: none; }
 .formula-preview { margin: 10px 0; }
 
 /* ─── LAYOUT HELPERS ─── */
-.topbar-actions, .nav-tabs, .inline-actions, .button-group {
+.topbar-actions, .inline-actions, .button-group {
   display: flex; gap: 8px; flex-wrap: wrap;
 }
 .action-pair { flex-wrap: nowrap; align-items: center; }
@@ -1378,7 +1395,13 @@ body.theme-dark .session-panel { background: var(--panel); border-color: var(--l
   position: fixed; right: 16px; bottom: 16px; z-index: 1002;
   display: flex; flex-direction: column; align-items: stretch; gap: 6px;
   max-width: min(320px, calc(100vw - 32px));
+  transition: bottom 0.15s ease;
 }
+/* Cuando la barra de créditos entra en pantalla (scroll al final), subimos los
+   widgets flotantes para que no queden encima de ella. --footer-clearance la
+   calcula index.html en base a la altura real del footer. */
+body.footer-in-view .activity-log-widget { bottom: var(--footer-clearance, 74px); }
+body.footer-in-view .sync-badge { bottom: var(--footer-clearance, 74px); }
 .activity-log-toggle {
   display: flex; align-items: center; gap: 8px;
   background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
