@@ -1425,11 +1425,15 @@ body.theme-dark .session-panel { background: var(--panel); border-color: var(--l
   max-width: min(320px, calc(100vw - 32px));
   transition: bottom 0.15s ease;
 }
-/* Cuando la barra de créditos entra en pantalla (scroll al final), subimos los
-   widgets flotantes para que no queden encima de ella. --footer-clearance la
-   calcula index.html en base a la altura real del footer. */
-body.footer-in-view .activity-log-widget { bottom: var(--footer-clearance, 74px); }
-body.footer-in-view .sync-badge { bottom: var(--footer-clearance, 74px); }
+/* Cuando la barra de créditos entra en pantalla (página corta o scroll al final),
+   los widgets flotantes dejan de estar fijos al viewport y se anclan (top calculado
+   por index.html en coordenadas del documento) justo encima del footer, en vez de
+   quedar flotando en un hueco vacío entre el último bloque de contenido y el footer. */
+body.footer-in-view .activity-log-widget,
+body.footer-in-view .sync-badge {
+  position: absolute;
+  bottom: auto;
+}
 .activity-log-toggle {
   display: flex; align-items: center; gap: 8px;
   background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
@@ -1469,6 +1473,17 @@ body.footer-in-view .sync-badge { bottom: var(--footer-clearance, 74px); }
 }
 .update-modal-card { width: min(760px,calc(100vw - 20px)); }
 .notes-textarea { width: 100%; min-height: 210px; resize: vertical; }
+
+.attendance-record-modal-card { width: min(420px,calc(100vw - 20px)); }
+.attendance-record-modal-body { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
+.attendance-record-modal-row { display: flex; justify-content: space-between; gap: 12px; padding: 7px 0; border-bottom: 1px solid var(--line-soft); font-size: 12px; }
+.attendance-record-modal-row:last-of-type { border-bottom: none; }
+.attendance-record-modal-row span:first-child { color: var(--muted); text-transform: uppercase; font-size: 10px; letter-spacing: 0.08em; }
+.attendance-record-modal-row span:last-child { font-weight: 600; text-align: right; }
+.attendance-record-modal-actions { display: flex; gap: 8px; margin-top: 6px; }
+
+.attendance-row-clickable { cursor: pointer; }
+.attendance-row-clickable:hover td { background: rgba(37,99,235,0.06); }
 
 .calculator-card {
   position: relative; width: min(300px,calc(100vw - 20px));
@@ -1761,6 +1776,25 @@ body.footer-in-view .sync-badge { bottom: var(--footer-clearance, 74px); }
   .nav-tabs { display: none; }
   .mobile-topbar { display: flex; gap: 6px; align-items: center; margin-bottom: 16px; }
   .mobile-topbar .mobile-menu-btn { flex: 1 1 auto; }
+
+  /* Asistencia: compactar ficha, tabla y análisis en móvil */
+  .card { padding: 12px; }
+  .attendance-actions { flex-wrap: wrap; flex-direction: column; }
+  .attendance-actions .btn { min-width: 0; width: 100%; }
+  .attendance-chrono-wrap { justify-content: center; text-align: center; }
+
+  .attendance-records-table-wrap table th:nth-child(3),
+  .attendance-records-table-wrap table td:nth-child(3),
+  .attendance-records-table-wrap table th:nth-child(4),
+  .attendance-records-table-wrap table td:nth-child(4),
+  .attendance-records-table-wrap table th:nth-child(5),
+  .attendance-records-table-wrap table td:nth-child(5),
+  .attendance-records-table-wrap table th:nth-child(7),
+  .attendance-records-table-wrap table td:nth-child(7),
+  .attendance-records-table-wrap table th:nth-child(8),
+  .attendance-records-table-wrap table td:nth-child(8) { display: none; }
+  .attendance-records-table-wrap table td[colspan] { display: table-cell; }
+  .table-compact.attendance-records-table-wrap th, .table-compact.attendance-records-table-wrap td { padding: 7px 8px; font-size: 12px; }
 }
 @media (max-width: 700px) {
   .finance-section-body > div[style*="grid-template-columns:1fr 1fr"] {

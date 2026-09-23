@@ -6,11 +6,12 @@
   <title>AndiApp · Costeo y gestión interna</title>
   <meta name="description" content="Plataforma interna para proyectar escenarios, costear trabajos y organizar órdenes de trabajo." />
   <script>
-    window.ERM_APP_VERSION = '2.0.0';
+    window.ERM_APP_VERSION = '2.0.1';
   </script>
-  <link rel="manifest" href="manifest.json" />
-  <link rel="icon" type="image/svg+xml" href="assets/logo/logoapp.svg" />
-  <link rel="apple-touch-icon" href="assets/logo/logoapp.svg" />
+  <link rel="manifest" href="manifest.json?v=2.0.1" />
+  <link rel="icon" type="image/svg+xml" href="assets/logo/logoapp.svg?v=2.0.1" />
+  <link rel="icon" type="image/png" sizes="32x32" href="assets/logo/icons/logoapp-32.png?v=2.0.1" />
+  <link rel="apple-touch-icon" sizes="180x180" href="assets/logo/icons/logoapp-180.png?v=2.0.1" />
   <meta name="theme-color" content="#2563eb" />
   <meta name="mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -18,7 +19,7 @@
   <meta name="apple-mobile-web-app-title" content="AndiApp" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link rel="stylesheet" href="assets/css/styles.css" />
+  <link rel="stylesheet" href="assets/css/styles.css?v=2.0.1" />
   <script type="module" src="https://ajax.googleapis.com/ajax/libs/model-viewer/3.4.0/model-viewer.min.js"></script>
 </head>
 <body>
@@ -39,9 +40,7 @@
   <div class="app-shell">
     <header class="topbar">
       <div>
-        <p class="eyebrow">Plataforma interna de gestión</p>
         <h1>AndiApp</h1>
-        <p class="subtitle">Modela escenarios, calcula costos reales y organiza presupuestos y órdenes de trabajo en un solo lugar.</p>
       </div>
     </header>
 
@@ -125,6 +124,17 @@
     </div>
   </div>
 
+  <div id="attendance-record-modal" class="notes-modal is-hidden" aria-hidden="true">
+    <div class="notes-modal-backdrop" data-action="close-attendance-record-modal"></div>
+    <div class="notes-modal-card attendance-record-modal-card" role="dialog" aria-modal="true" aria-labelledby="attendance-record-modal-title">
+      <div class="section-title">
+        <h3 id="attendance-record-modal-title">Detalle de jornada</h3>
+        <button class="btn btn-soft btn-mini-close" data-action="close-attendance-record-modal" title="Cerrar" aria-label="Cerrar">✕</button>
+      </div>
+      <div id="attendance-record-modal-body" class="attendance-record-modal-body"></div>
+    </div>
+  </div>
+
   <div id="calculator-modal" class="notes-modal is-hidden" aria-hidden="true">
     <div class="notes-modal-backdrop" data-action="close-calculator"></div>
     <div class="calculator-card" role="dialog" aria-modal="true" aria-labelledby="calculator-title">
@@ -160,31 +170,61 @@
     (function () {
       var footer = document.querySelector('.app-footer');
       if (!footer) return;
+      var GAP = 12;
 
-      function updateClearance() {
-        var height = footer.getBoundingClientRect().height;
-        document.documentElement.style.setProperty('--footer-clearance', (height + 24) + 'px');
+      function dockedEls() {
+        var els = [document.getElementById('activity-log-widget')];
+        var badge = document.querySelector('.sync-badge');
+        if (badge) els.push(badge);
+        return els.filter(Boolean);
       }
-      updateClearance();
-      if ('ResizeObserver' in window) new ResizeObserver(updateClearance).observe(footer);
-      window.addEventListener('resize', updateClearance);
+
+      // Cuando el footer de créditos entra en pantalla (página corta o scroll al final),
+      // los widgets flotantes (Historial, Sincronizado) dejan de estar fijos al viewport
+      // y se anclan justo encima del footer, en coordenadas reales del documento, para
+      // no quedar flotando en un hueco vacío entre el contenido y el footer.
+      function updateDock() {
+        if (!document.body.classList.contains('footer-in-view')) return;
+        var footerTop = footer.getBoundingClientRect().top + window.pageYOffset;
+        dockedEls().forEach(function (el) {
+          if (ro) ro.observe(el);
+          var h = el.getBoundingClientRect().height;
+          el.style.top = (footerTop - GAP - h) + 'px';
+        });
+      }
+
+      function clearDock() {
+        dockedEls().forEach(function (el) { el.style.top = ''; });
+      }
+
+      var ro = null;
+      if ('ResizeObserver' in window) {
+        ro = new ResizeObserver(updateDock);
+        ro.observe(footer);
+      }
+      window.addEventListener('resize', updateDock);
 
       if ('IntersectionObserver' in window) {
         new IntersectionObserver(function (entries) {
-          document.body.classList.toggle('footer-in-view', entries[0].isIntersecting);
+          var inView = entries[0].isIntersecting;
+          document.body.classList.toggle('footer-in-view', inView);
+          if (inView) updateDock(); else clearDock();
         }, { threshold: 0 }).observe(footer);
       }
+
+      // El badge de sincronización se crea dinámicamente tras el login.
+      new MutationObserver(updateDock).observe(document.body, { childList: true });
     })();
   </script>
-  <script src="assets/js/data.js"></script>
-  <script src="assets/js/storage.js"></script>
-  <script src="assets/js/calculations.js"></script>
+  <script src="assets/js/data.js?v=2.0.1"></script>
+  <script src="assets/js/storage.js?v=2.0.1"></script>
+  <script src="assets/js/calculations.js?v=2.0.1"></script>
   <script src="assets/js/vendor/jszip.min.js"></script>
   <script src="assets/js/vendor/jspdf.umd.min.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js"></script>
   <script src="assets/js/firebase-config.js"></script>
-  <script src="assets/js/sync.js"></script>
+  <script src="assets/js/sync.js?v=2.0.1"></script>
 </body>
 </html>

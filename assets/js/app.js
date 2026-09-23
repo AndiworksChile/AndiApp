@@ -2853,6 +2853,8 @@ Objetivo
     refs.themeToggleBtn = document.getElementById('theme-toggle-btn');
     refs.aiBriefModal = document.getElementById('ai-brief-modal');
     refs.aiBriefContent = document.getElementById('ai-brief-content');
+    refs.attendanceRecordModal = document.getElementById('attendance-record-modal');
+    refs.attendanceRecordModalBody = document.getElementById('attendance-record-modal-body');
     refs.activityLogWidget = document.getElementById('activity-log-widget');
     refs.activityLogLatest = document.getElementById('activity-log-latest');
     refs.activityLogList = document.getElementById('activity-log-list');
@@ -4079,10 +4081,23 @@ Objetivo
         return;
       }
 
+      if (action === 'view-attendance-record') {
+        const recordId = actionBtn.dataset.id;
+        if (!recordId) return;
+        openAttendanceRecordModal(recordId);
+        return;
+      }
+
+      if (action === 'close-attendance-record-modal') {
+        closeAttendanceRecordModal();
+        return;
+      }
+
       if (action === 'edit-attendance-record') {
         const recordId = actionBtn.dataset.id;
         if (!recordId) return;
         if (!getAttendanceRecordById(recordId)) return;
+        closeAttendanceRecordModal();
         state.ui.attendanceEditingId = recordId;
         render();
         syncAttendanceEditCommentsInput();
@@ -4150,6 +4165,7 @@ Objetivo
         const recordId = actionBtn.dataset.id;
         if (!recordId) return;
         if (!confirmSafe('¿Eliminar este registro de asistencia?')) return;
+        closeAttendanceRecordModal();
         state.attendance.records = (state.attendance.records || []).filter((item) => item.id !== recordId);
         if (state.ui.attendanceEditingId === recordId) state.ui.attendanceEditingId = null;
         stampBaseUpdate('attendance');
@@ -4740,6 +4756,10 @@ Objetivo
     document.addEventListener('keydown', (event) => {
       if (event.key === 'Escape' && refs.notesModal && !refs.notesModal.classList.contains('is-hidden')) {
         closeNotesModal();
+        return;
+      }
+      if (event.key === 'Escape' && refs.attendanceRecordModal && !refs.attendanceRecordModal.classList.contains('is-hidden')) {
+        closeAttendanceRecordModal();
         return;
       }
       if (event.key === 'Escape' && state.ui.inlinePdfViewer?.dataUrl) {
@@ -5486,6 +5506,37 @@ Objetivo
     if (!refs.aiBriefModal) return;
     refs.aiBriefModal.classList.add('is-hidden');
     refs.aiBriefModal.setAttribute('aria-hidden', 'true');
+  }
+
+  function openAttendanceRecordModal(recordId) {
+    const record = getAttendanceRecordById(recordId);
+    if (!record || !refs.attendanceRecordModal || !refs.attendanceRecordModalBody) return;
+    const dk = toLocalDateValue(record.checkInAt || '');
+    const dayTotalMs = (state.attendance.records || [])
+      .filter((item) => toLocalDateValue(item.checkInAt || '') === dk)
+      .reduce((sum, item) => sum + getAttendanceRecordWorkedMs(item), 0);
+
+    refs.attendanceRecordModalBody.innerHTML = `
+      <div class="attendance-record-modal-row"><span>Fecha</span><span>${sanitize(formatAttendanceDate(record.checkInAt))}</span></div>
+      <div class="attendance-record-modal-row"><span>Empleado</span><span>${sanitize(record.employeeName || '-')}</span></div>
+      <div class="attendance-record-modal-row"><span>Entrada</span><span>${sanitize(formatAttendanceTime(record.checkInAt))}</span></div>
+      <div class="attendance-record-modal-row"><span>Salida</span><span>${sanitize(formatAttendanceTime(record.checkOutAt))}</span></div>
+      <div class="attendance-record-modal-row"><span>Tiempo trabajado</span><span>${sanitize(getAttendancePauseLabel(getAttendanceRecordWorkedMs(record)))}</span></div>
+      <div class="attendance-record-modal-row"><span>Total del día</span><span>${sanitize(getAttendancePauseLabel(dayTotalMs))}</span></div>
+      <div class="attendance-record-modal-row"><span>Comentarios</span><span>${sanitize(record.comments || '') || '—'}</span></div>
+      <div class="attendance-record-modal-actions">
+        <button class="btn btn-soft" data-action="edit-attendance-record" data-id="${record.id}">${iconSvg('edit')} Editar</button>
+        <button class="btn btn-soft" data-action="delete-attendance-record" data-id="${record.id}">${iconSvg('trash')} Eliminar</button>
+      </div>
+    `;
+    refs.attendanceRecordModal.classList.remove('is-hidden');
+    refs.attendanceRecordModal.setAttribute('aria-hidden', 'false');
+  }
+
+  function closeAttendanceRecordModal() {
+    if (!refs.attendanceRecordModal) return;
+    refs.attendanceRecordModal.classList.add('is-hidden');
+    refs.attendanceRecordModal.setAttribute('aria-hidden', 'true');
   }
 
   const calculatorState = { display: '0', storedValue: null, pendingOp: null, awaitingNext: false };
@@ -11381,7 +11432,7 @@ Objetivo
         ? `<span style="font-weight:600;">${sanitize(getAttendancePauseLabel(dayTotal))}</span>${(dayRecordCount[dk] || 1) > 1 ? `<br><span class="small muted" style="font-size:10px;">${dayRecordCount[dk]} entradas</span>` : ''}`
         : '<span class="small muted" style="color:transparent;">—</span>';
 
-      const recordRow = `<tr${rowStyle}>
+      const recordRow = `<tr${rowStyle}${isEditing ? '' : ` class="attendance-row-clickable" data-action="view-attendance-record" data-id="${record.id}"`}>
         <td style="${topBorder}${isEditing ? '' : bandBg}">${isFirstInDay ? sanitize(formatAttendanceDate(record.checkInAt)) : '<span class="small muted" style="color:transparent;">—</span>'}</td>
         <td>${sanitize(record.employeeName || '-')}</td>
         <td>${sanitize(formatAttendanceTime(record.checkInAt))}</td>

@@ -13,7 +13,7 @@
 
   const startApp = () => {
     const script = document.createElement('script');
-    script.src = 'assets/js/app.js';
+    script.src = `assets/js/app.js?v=${encodeURIComponent(window.ERM_APP_VERSION || Date.now())}`;
     document.body.appendChild(script);
   };
 
