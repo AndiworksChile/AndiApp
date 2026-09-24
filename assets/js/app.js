@@ -2855,6 +2855,9 @@ Objetivo
     refs.aiBriefContent = document.getElementById('ai-brief-content');
     refs.attendanceRecordModal = document.getElementById('attendance-record-modal');
     refs.attendanceRecordModalBody = document.getElementById('attendance-record-modal-body');
+    refs.pickerModal = document.getElementById('picker-modal');
+    refs.pickerModalTitle = document.getElementById('picker-modal-title');
+    refs.pickerModalList = document.getElementById('picker-modal-list');
     refs.activityLogWidget = document.getElementById('activity-log-widget');
     refs.activityLogLatest = document.getElementById('activity-log-latest');
     refs.activityLogList = document.getElementById('activity-log-list');
@@ -3494,7 +3497,23 @@ Objetivo
         render();
       }
 
+      if (action === 'open-material-group-picker') {
+        openMaterialGroupPicker(actionBtn.dataset.rowId);
+        return;
+      }
+
+      if (action === 'open-material-option-picker') {
+        openMaterialOptionPicker(actionBtn.dataset.rowId);
+        return;
+      }
+
+      if (action === 'close-picker-modal') {
+        closePickerModal();
+        return;
+      }
+
       if (action === 'select-material-group') {
+        closePickerModal();
         const row = state.quote.materials.find((item) => item.id === actionBtn.dataset.rowId);
         if (row) {
           row.group = actionBtn.dataset.group || '';
@@ -3504,6 +3523,7 @@ Objetivo
       }
 
       if (action === 'select-material-option') {
+        closePickerModal();
         const row = state.quote.materials.find((item) => item.id === actionBtn.dataset.rowId);
         const materialId = actionBtn.dataset.materialId || '';
         if (row) {
@@ -4762,6 +4782,10 @@ Objetivo
         closeAttendanceRecordModal();
         return;
       }
+      if (event.key === 'Escape' && refs.pickerModal && !refs.pickerModal.classList.contains('is-hidden')) {
+        closePickerModal();
+        return;
+      }
       if (event.key === 'Escape' && state.ui.inlinePdfViewer?.dataUrl) {
         closeInlinePdfViewer();
       }
@@ -5537,6 +5561,58 @@ Objetivo
     if (!refs.attendanceRecordModal) return;
     refs.attendanceRecordModal.classList.add('is-hidden');
     refs.attendanceRecordModal.setAttribute('aria-hidden', 'true');
+  }
+
+  function openPickerModal(title, listHtml) {
+    if (!refs.pickerModal || !refs.pickerModalList) return;
+    if (refs.pickerModalTitle) refs.pickerModalTitle.textContent = title;
+    refs.pickerModalList.innerHTML = listHtml || '<div class="empty-option">Sin opciones disponibles.</div>';
+    refs.pickerModal.classList.remove('is-hidden');
+    refs.pickerModal.setAttribute('aria-hidden', 'false');
+  }
+
+  function closePickerModal() {
+    if (!refs.pickerModal) return;
+    refs.pickerModal.classList.add('is-hidden');
+    refs.pickerModal.setAttribute('aria-hidden', 'true');
+  }
+
+  function getMaterialGroupsList() {
+    return [...new Set((state.database.materials || []).map((item) => item.group).filter(Boolean))];
+  }
+
+  function openMaterialGroupPicker(rowId) {
+    const row = (state.quote.materials || []).find((item) => item.id === rowId);
+    if (!row) return;
+    const groups = getMaterialGroupsList();
+    const currentGroup = row.group || groups[0] || '';
+    const listHtml = groups.length
+      ? groups.map((group) => `
+        <button type="button" class="custom-dropdown-option ${group === currentGroup ? 'active' : ''}" data-action="select-material-group" data-row-id="${rowId}" data-group="${sanitize(group)}">
+          <span class="option-name">${sanitize(group)}</span>
+        </button>
+      `).join('')
+      : '<div class="empty-option">No hay grupos disponibles.</div>';
+    openPickerModal('Selecciona un grupo', listHtml);
+  }
+
+  function openMaterialOptionPicker(rowId) {
+    const row = (state.quote.materials || []).find((item) => item.id === rowId);
+    if (!row) return;
+    const groups = getMaterialGroupsList();
+    const currentGroup = row.group || groups[0] || '';
+    const filteredMaterials = currentGroup
+      ? (state.database.materials || []).filter((material) => material.group === currentGroup)
+      : [];
+    const listHtml = filteredMaterials.length
+      ? filteredMaterials.map((material) => `
+        <button type="button" class="custom-dropdown-option ${material.id === row.materialId ? 'active' : ''}" data-action="select-material-option" data-row-id="${rowId}" data-material-id="${material.id}">
+          <span class="option-name">${sanitize(material.name)}</span>
+          <span class="option-meta">${sanitize(material.provider || '')}</span>
+        </button>
+      `).join('')
+      : '<div class="empty-option">No hay insumos disponibles para este grupo.</div>';
+    openPickerModal('Selecciona un insumo', listHtml);
   }
 
   const calculatorState = { display: '0', storedValue: null, pendingOp: null, awaitingNext: false };
@@ -9052,19 +9128,6 @@ Objetivo
 
     const materialRows = calc.quoteSummary.materialLines.map((line) => {
       const currentGroup = line.group || line.material?.group || materialGroups[0] || '';
-      const filteredMaterials = currentGroup
-        ? database.materials.filter((material) => material.group === currentGroup)
-        : [];
-
-      const groupOptions = [`<option value="">Selecciona grupo</option>`]
-        .concat(materialGroups.map((group) => `<option value="${group}" ${group === currentGroup ? 'selected' : ''}>${group}</option>`))
-        .join('');
-
-      const materialOptions = [`<option value="">Selecciona insumo</option>`]
-        .concat(filteredMaterials.map((material) => `
-          <option value="${material.id}" ${material.id === line.materialId ? 'selected' : ''}>${sanitize(material.name)}</option>
-        `)).join('');
-
       const wastePercent = Number(line.wastePercent) || 0;
 
       const formulaInfo = line.material
@@ -9074,33 +9137,16 @@ Objetivo
       return `
         <tr>
           <td class="group-dropdown-cell">
-            <details class="custom-dropdown">
-              <summary class="custom-dropdown-summary compact-dropdown-summary" title="${sanitize(currentGroup || 'Selecciona grupo')}">${sanitize(currentGroup || 'Selecciona grupo')}</summary>
-              <div class="custom-dropdown-menu">
-                ${materialGroups.length
-                  ? materialGroups.map((group) => `
-                    <button type="button" class="custom-dropdown-option ${group === currentGroup ? 'active' : ''}" data-action="select-material-group" data-row-id="${line.id}" data-group="${group}">
-                      <span class="option-name">${sanitize(group)}</span>
-                    </button>
-                  `).join('')
-                  : '<div class="empty-option">No hay grupos disponibles.</div>'}
-              </div>
-            </details>
+            <button type="button" class="btn btn-soft picker-trigger-btn" data-action="open-material-group-picker" data-row-id="${line.id}" title="${sanitize(currentGroup || 'Selecciona grupo')}">
+              <span class="picker-trigger-label">${sanitize(currentGroup || 'Selecciona grupo')}</span>
+              <span class="picker-trigger-caret" aria-hidden="true">▾</span>
+            </button>
           </td>
           <td class="insumo-cell">
-            <details class="custom-dropdown">
-              <summary class="custom-dropdown-summary" title="${sanitize(line.material?.name || 'Selecciona insumo')}">${sanitize(line.material?.name || 'Selecciona insumo')}</summary>
-              <div class="custom-dropdown-menu">
-                ${filteredMaterials.length
-                  ? filteredMaterials.map((material) => `
-                    <button type="button" class="custom-dropdown-option ${material.id === line.materialId ? 'active' : ''}" data-action="select-material-option" data-row-id="${line.id}" data-material-id="${material.id}">
-                      <span class="option-name">${sanitize(material.name)}</span>
-                      <span class="option-meta">${sanitize(material.provider || '')}</span>
-                    </button>
-                  `).join('')
-                  : '<div class="empty-option">No hay insumos disponibles para este grupo.</div>'}
-              </div>
-            </details>
+            <button type="button" class="btn btn-soft picker-trigger-btn" data-action="open-material-option-picker" data-row-id="${line.id}" title="${sanitize(line.material?.name || 'Selecciona insumo')}">
+              <span class="picker-trigger-label">${sanitize(line.material?.name || 'Selecciona insumo')}</span>
+              <span class="picker-trigger-caret" aria-hidden="true">▾</span>
+            </button>
             <div class="small">${sanitize(line.material?.provider || '')}</div>
           </td>
           <td class="cell-with-meta compact-cost-cell">

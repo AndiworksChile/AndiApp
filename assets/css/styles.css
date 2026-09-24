@@ -285,8 +285,6 @@ body.theme-dark .ot-card .small,
 body.theme-dark .expense-card-metrics div,
 body.theme-dark .expense-card .small { color: var(--muted); }
 
-body.theme-dark .custom-dropdown-summary { background: #1e1e1e; color: var(--ink); border-color: var(--line); }
-body.theme-dark .custom-dropdown-menu   { background: #1a1a1a; border-color: var(--line); }
 body.theme-dark .custom-dropdown-option { color: var(--ink); }
 body.theme-dark .custom-dropdown-option:hover,
 body.theme-dark .custom-dropdown-option.active { background: #2a2a2a; }
@@ -800,6 +798,7 @@ td {
 .quote-work-table { overflow-x: visible; }
 .quote-work-table table { table-layout: fixed; }
 .quote-work-table th, .quote-work-table td { white-space: normal; word-break: break-word; }
+.quote-work-table th { font-size: 8px; letter-spacing: 0.05em; line-height: 1.2; padding: 5px 6px; }
 .quote-work-table select, .quote-work-table input { max-width: 100%; }
 .table-compact.quote-work-table table th:first-child,
 .table-compact.quote-work-table table td:first-child { width: 14%; font-size: 11px; }
@@ -1336,29 +1335,24 @@ select option.option-friend { color: #966d00; font-weight: 700; }
   font-variant-numeric: tabular-nums;
 }
 
-/* ─── CUSTOM DROPDOWN ─── */
-.custom-dropdown { position: relative; }
-.custom-dropdown-summary {
-  list-style: none; width: 100%;
-  border: var(--border); border-radius: var(--radius);
-  background: var(--panel); padding: 6px 26px 6px 8px;
-  font-size: 11px; line-height: 1.25; cursor: pointer;
-  white-space: normal; word-break: break-word;
-  min-height: 40px; position: relative;
+/* ─── SELECTOR EN VENTANA (picker) ─── */
+.picker-trigger-btn {
+  display: flex; align-items: center; justify-content: space-between; gap: 6px;
+  width: 100%; text-align: left;
+  padding: 8px 8px; font-size: 11px; font-weight: 500;
+  text-transform: none; letter-spacing: normal;
+  min-height: 36px;
 }
-.custom-dropdown-summary::-webkit-details-marker { display: none; }
-.custom-dropdown-summary::after { content: '▾'; position: absolute; right: 8px; top: 50%; transform: translateY(-50%); color: var(--muted); }
-.custom-dropdown-menu {
-  position: absolute; left: 0; right: 0; top: calc(100% + 3px); z-index: 30;
-  max-height: 210px; overflow-y: auto;
-  background: var(--panel); border: var(--border); border-radius: var(--radius);
-  box-shadow: var(--shadow); padding: 3px;
-}
-.custom-dropdown-option { width: 100%; border: none; background: transparent; text-align: left; padding: 6px 7px; border-radius: var(--radius); cursor: pointer; }
+.picker-trigger-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1 1 auto; min-width: 0; }
+.picker-trigger-caret { flex: 0 0 auto; font-size: 9px; color: var(--muted); }
+.group-dropdown-cell .picker-trigger-btn { font-size: 10px; min-height: 32px; }
+
+.picker-modal-card { width: min(420px,calc(100vw - 20px)); }
+.picker-modal-list { display: flex; flex-direction: column; gap: 2px; margin-top: 8px; max-height: 60vh; overflow-y: auto; }
+.custom-dropdown-option { width: 100%; border: none; background: transparent; text-align: left; padding: 8px 9px; border-radius: var(--radius); cursor: pointer; }
 .custom-dropdown-option:hover, .custom-dropdown-option.active { background: var(--panel-soft); }
-.option-name  { display: block; font-size: 11px; line-height: 1.25; color: var(--ink); white-space: normal; word-break: break-word; }
+.option-name  { display: block; font-size: 12px; line-height: 1.25; color: var(--ink); white-space: normal; word-break: break-word; }
 .option-meta, .empty-option { display: block; font-size: 10px; color: var(--muted); margin-top: 1px; }
-.group-dropdown-cell .custom-dropdown-summary { font-size: 10px; min-height: 36px; }
 
 /* ─── FORMULA ─── */
 .docs-compact  { display: grid; gap: 7px; }
@@ -1776,6 +1770,10 @@ body.footer-in-view .sync-badge {
   .nav-tabs { display: none; }
   .mobile-topbar { display: flex; gap: 6px; align-items: center; margin-bottom: 16px; }
   .mobile-topbar .mobile-menu-btn { flex: 1 1 auto; }
+
+  /* iOS/Android hacen zoom automático al enfocar un campo con font-size < 16px;
+     forzamos 16px en todos los campos para que el ancho de la app no cambie al escribir. */
+  input, select, textarea { font-size: 16px; }
 
   /* Asistencia: compactar ficha, tabla y análisis en móvil */
   .card { padding: 12px; }
