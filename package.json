@@ -10,6 +10,7 @@
   "author": "",
   "license": "ISC",
   "devDependencies": {
+    "playwright": "^1.63.0",
     "serve": "^14.2.6",
     "shx": "^0.4.0"
   },
