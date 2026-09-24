@@ -93,6 +93,23 @@
     panel.setAttribute('aria-hidden', 'false');
     const logoutBtn = document.getElementById('session-logout-btn');
     if (logoutBtn) logoutBtn.addEventListener('click', signOutSession);
+
+    const toggleBtn = document.getElementById('session-toggle-btn');
+    const menu = document.getElementById('session-menu');
+    if (toggleBtn && menu) {
+      toggleBtn.addEventListener('click', (event) => {
+        event.stopPropagation();
+        const willShow = menu.classList.contains('is-hidden');
+        menu.classList.toggle('is-hidden', !willShow);
+        toggleBtn.setAttribute('aria-expanded', willShow ? 'true' : 'false');
+      });
+      document.addEventListener('click', (event) => {
+        if (menu.classList.contains('is-hidden')) return;
+        if (menu.contains(event.target) || toggleBtn.contains(event.target)) return;
+        menu.classList.add('is-hidden');
+        toggleBtn.setAttribute('aria-expanded', 'false');
+      });
+    }
   };
 
   function showLogin() {

@@ -6,12 +6,12 @@
   <title>AndiApp · Costeo y gestión interna</title>
   <meta name="description" content="Plataforma interna para proyectar escenarios, costear trabajos y organizar órdenes de trabajo." />
   <script>
-    window.ERM_APP_VERSION = '2.0.6';
+    window.ERM_APP_VERSION = '2.0.7';
   </script>
-  <link rel="manifest" href="manifest.json?v=2.0.6" />
-  <link rel="icon" type="image/svg+xml" href="assets/logo/logoapp.svg?v=2.0.6" />
-  <link rel="icon" type="image/png" sizes="32x32" href="assets/logo/icons/logoapp-32.png?v=2.0.6" />
-  <link rel="apple-touch-icon" sizes="180x180" href="assets/logo/icons/logoapp-180.png?v=2.0.6" />
+  <link rel="manifest" href="manifest.json?v=2.0.7" />
+  <link rel="icon" type="image/svg+xml" href="assets/logo/logoapp.svg?v=2.0.7" />
+  <link rel="icon" type="image/png" sizes="32x32" href="assets/logo/icons/logoapp-32.png?v=2.0.7" />
+  <link rel="apple-touch-icon" sizes="180x180" href="assets/logo/icons/logoapp-180.png?v=2.0.7" />
   <meta name="theme-color" content="#2563eb" />
   <meta name="mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -19,14 +19,19 @@
   <meta name="apple-mobile-web-app-title" content="AndiApp" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link rel="stylesheet" href="assets/css/styles.css?v=2.0.6" />
+  <link rel="stylesheet" href="assets/css/styles.css?v=2.0.7" />
   <script type="module" src="https://ajax.googleapis.com/ajax/libs/model-viewer/3.4.0/model-viewer.min.js"></script>
 </head>
 <body>
   <div id="session-panel" class="session-panel is-hidden" aria-hidden="true">
-    <span class="session-label">Sesión de: Andrés Baeza</span>
-    <button id="session-logout-btn" type="button" class="btn btn-soft session-btn">Cerrar Sesión</button>
-    <button type="button" class="btn btn-soft session-btn" data-action="save-all-bases-now" title="Guarda y confirma que todas las bases quedaron respaldadas">Guardar Bases</button>
+    <button id="session-toggle-btn" type="button" class="session-toggle" aria-expanded="false" aria-controls="session-menu" aria-label="Menú de sesión">
+      <span aria-hidden="true">☰</span> Sesión
+    </button>
+    <div id="session-menu" class="session-menu is-hidden">
+      <span class="session-label">Sesión de: Andrés Baeza</span>
+      <button id="session-logout-btn" type="button" class="btn btn-soft session-btn">Cerrar Sesión</button>
+      <button type="button" class="btn btn-soft session-btn" data-action="save-all-bases-now" title="Guarda y confirma que todas las bases quedaron respaldadas">Guardar Bases</button>
+    </div>
   </div>
 
   <div id="activity-log-widget" class="activity-log-widget">
@@ -192,15 +197,14 @@
 
       // Cuando el footer de créditos entra en pantalla (página corta o scroll al final),
       // los widgets flotantes (Historial, Sincronizado) dejan de estar fijos al viewport
-      // y se anclan justo encima del footer, en coordenadas reales del documento, para
-      // no quedar flotando en un hueco vacío entre el contenido y el footer.
+      // y se anclan justo DEBAJO del footer, en coordenadas reales del documento, para
+      // quedar bajo todo el contenido, incluidos los créditos, en vez de superponerse a ellos.
       function updateDock() {
         if (!document.body.classList.contains('footer-in-view')) return;
-        var footerTop = footer.getBoundingClientRect().top + window.pageYOffset;
+        var footerBottom = footer.getBoundingClientRect().bottom + window.pageYOffset;
         dockedEls().forEach(function (el) {
           if (ro) ro.observe(el);
-          var h = el.getBoundingClientRect().height;
-          el.style.top = (footerTop - GAP - h) + 'px';
+          el.style.top = (footerBottom + GAP) + 'px';
         });
       }
 
@@ -227,15 +231,15 @@
       new MutationObserver(updateDock).observe(document.body, { childList: true });
     })();
   </script>
-  <script src="assets/js/data.js?v=2.0.6"></script>
-  <script src="assets/js/storage.js?v=2.0.6"></script>
-  <script src="assets/js/calculations.js?v=2.0.6"></script>
+  <script src="assets/js/data.js?v=2.0.7"></script>
+  <script src="assets/js/storage.js?v=2.0.7"></script>
+  <script src="assets/js/calculations.js?v=2.0.7"></script>
   <script src="assets/js/vendor/jszip.min.js"></script>
   <script src="assets/js/vendor/jspdf.umd.min.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js"></script>
   <script src="assets/js/firebase-config.js"></script>
-  <script src="assets/js/sync.js?v=2.0.6"></script>
+  <script src="assets/js/sync.js?v=2.0.7"></script>
 </body>
 </html>

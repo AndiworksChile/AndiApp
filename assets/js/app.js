@@ -3743,7 +3743,13 @@ Objetivo
         refs.orderImportInput?.click();
       }
 
+      if (action === 'open-order-filter-picker') {
+        openOrderFilterPicker();
+        return;
+      }
+
       if (action === 'set-order-filter') {
+        closePickerModal();
         state.ui.orderFilter = actionBtn.dataset.filter || 'Todas';
         render();
       }
@@ -5613,6 +5619,28 @@ Objetivo
       `).join('')
       : '<div class="empty-option">No hay insumos disponibles para este grupo.</div>';
     openPickerModal('Selecciona un insumo', listHtml);
+  }
+
+  const ORDER_FILTER_OPTIONS = [
+    { key: 'Todas', label: 'Todas' },
+    { key: 'Entregadas', label: 'Entregadas' },
+    { key: 'En fabricación', label: 'En fabricación' },
+    { key: 'Prototipo', label: 'Prototipo' },
+    { key: 'Prospecto', label: 'Prospecto' },
+    { key: 'Aceptado', label: 'Presupuesto Aceptado' },
+    { key: 'Abonado (no entregado)', label: 'Abonado (no entregado)' },
+    { key: 'Entregado (pagado)', label: 'Entregado (pagado)' },
+    { key: 'Entregado (no pagado)', label: 'Entregado (no pagado)' }
+  ];
+
+  function openOrderFilterPicker() {
+    const currentFilter = state.ui.orderFilter === 'Activas' ? 'En fabricación' : (state.ui.orderFilter || 'Todas');
+    const listHtml = ORDER_FILTER_OPTIONS.map((item) => `
+      <button type="button" class="custom-dropdown-option ${currentFilter === item.key ? 'active' : ''}" data-action="set-order-filter" data-filter="${item.key}">
+        <span class="option-name">${sanitize(item.label)}</span>
+      </button>
+    `).join('');
+    openPickerModal('Filtrar OT por categoría', listHtml);
   }
 
   const calculatorState = { display: '0', storedValue: null, pendingOp: null, awaitingNext: false };
@@ -9976,19 +10004,7 @@ Objetivo
       visibleOrders.sort((a, b) => String(a.orderNumber || '').localeCompare(String(b.orderNumber || ''), undefined, { numeric: true, sensitivity: 'base' }));
     }
 
-    const filterButtons = [
-      { key: 'Todas', label: 'Todas' },
-      { key: 'Entregadas', label: 'Entregadas' },
-      { key: 'En fabricación', label: 'En fabricación' },
-      { key: 'Prototipo', label: 'Prototipo' },
-      { key: 'Prospecto', label: 'Prospecto' },
-      { key: 'Aceptado', label: 'Presupuesto Aceptado' },
-      { key: 'Abonado (no entregado)', label: 'Abonado (no entregado)' },
-      { key: 'Entregado (pagado)', label: 'Entregado (pagado)' },
-      { key: 'Entregado (no pagado)', label: 'Entregado (no pagado)' }
-    ].map((item) => {
-      return `<button class="btn filter-chip ${filter === item.key ? 'active' : ''}" data-action="set-order-filter" data-filter="${item.key}">${item.label}</button>`;
-    }).join('');
+    const currentFilterLabel = ORDER_FILTER_OPTIONS.find((item) => item.key === filter)?.label || 'Todas';
 
     const cards = visibleOrders.map((order) => {
       const meta = getOrderStatusMeta(order.status || 'Prospecto');
@@ -10030,13 +10046,16 @@ Objetivo
             <h2>Panel de Gestión de OT</h2>
             <p class="subtitle">Aquí puedes ver las órdenes guardadas en el sistema y reabrirlas para edición cuando lo necesites.</p>
           </div>
-          <div class="inline-actions">
-            <button class="btn btn-soft ${sortByOrderNumber ? 'active' : ''}" data-action="toggle-order-sort" title="Ordenar las OT por número de orden">${sortByOrderNumber ? '✓ ' : ''}Ordenar por N° OT</button>
-            <span class="pill ok">${(state.orders || []).length} OT</span>
-          </div>
+          <span class="pill ok">${(state.orders || []).length} OT</span>
         </div>
 
-        <div class="filter-row">${filterButtons}</div>
+        <div class="ot-order-controls">
+          <button type="button" class="btn btn-soft picker-trigger-btn" data-action="open-order-filter-picker" title="Filtrar OT por categoría">
+            <span class="picker-trigger-label">Categoría: ${sanitize(currentFilterLabel)}</span>
+            <span class="picker-trigger-caret" aria-hidden="true">▾</span>
+          </button>
+          <button class="btn btn-soft ${sortByOrderNumber ? 'active' : ''}" data-action="toggle-order-sort" title="Ordenar las OT por número de orden">${sortByOrderNumber ? '✓ ' : ''}Ordenar por N° OT</button>
+        </div>
 
         <div class="ot-grid">
           ${cards || '<div class="empty-state">Todavía no hay órdenes guardadas en el sistema. Importa la Base OT desde la Central de Descargas.</div>'}

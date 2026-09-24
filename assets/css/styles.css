@@ -669,6 +669,7 @@ input[type="range"]:focus { outline: none; }
 
 .filter-chip.active { background: var(--brand); color: #fff; border-color: var(--brand); }
 .filter-row { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
+.ot-order-controls { display: flex; flex-direction: column; gap: 6px; max-width: 260px; margin-bottom: 12px; }
 .form-extra-block { margin-top: 10px; }
 .formula-preview { margin: 10px 0; }
 
@@ -688,8 +689,9 @@ input[type="range"]:focus { outline: none; }
 .kpi-grid-4 { grid-template-columns: repeat(4,minmax(0,1fr)); }
 .grid-span-2 { grid-column: span 2; }
 /* Par de fechas: se mantienen una junto a la otra en todos los anchos, incluido móvil. */
-.date-pair-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 8px; align-items: start; }
-.date-pair-grid input[type="date"] { width: 100%; box-sizing: border-box; }
+.date-pair-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 10px; align-items: start; }
+.date-pair-grid > div { min-width: 0; }
+.date-pair-grid input[type="date"] { width: 100%; min-width: 0; box-sizing: border-box; }
 
 .database-form-layout { display: flex; flex-direction: column; gap: 8px; }
 .database-grid { display: grid; gap: 8px; }
@@ -1418,19 +1420,28 @@ select option.option-friend { color: #966d00; font-weight: 700; }
 .status-group-cell { display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; }
 .group-cell-label  { text-align: left; flex: 1; }
 
-/* ─── SESSION PANEL ─── */
-.session-panel {
-  position: fixed; top: 16px; right: 16px; z-index: 1002;
-  display: flex; flex-direction: column; align-items: stretch; gap: 6px;
-  background: var(--panel); border: 1px solid var(--line); padding: 10px 12px;
-}
+/* ─── SESSION PANEL (menú desplegable) ─── */
+.session-panel { position: fixed; top: 16px; right: 16px; z-index: 1002; }
 .session-panel.is-hidden { display: none; }
+.session-toggle {
+  display: flex; align-items: center; gap: 6px; cursor: pointer;
+  background: var(--panel); border: 1px solid var(--line); padding: 8px 11px;
+  font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.1em;
+  color: var(--ink); border-radius: var(--radius);
+}
+.session-menu {
+  position: absolute; top: calc(100% + 4px); right: 0; min-width: 160px;
+  display: flex; flex-direction: column; align-items: stretch; gap: 6px;
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 10px 12px; box-shadow: var(--shadow); z-index: 1003;
+}
+.session-menu.is-hidden { display: none; }
 .session-label {
   font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.1em;
   color: var(--muted); text-align: center; white-space: nowrap;
 }
 .session-btn { font-size: 9px; padding: 6px 10px; white-space: nowrap; }
-body.theme-dark .session-panel { background: var(--panel); border-color: var(--line); }
+body.theme-dark .session-toggle, body.theme-dark .session-menu { background: var(--panel); border-color: var(--line); }
 
 /* ─── ACTIVITY LOG WIDGET ─── */
 .activity-log-widget {
