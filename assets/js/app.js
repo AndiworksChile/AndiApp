@@ -8516,6 +8516,7 @@ Objetivo
         <div class="summary-row"><span>Utilidad en CLP</span><strong>${formatCurrency(summary.contribution)}</strong></div>
         <p class="help"><span class="summary-selected-tag ${selectedMeta.className}">${selectedMeta.label}</span></p>
         <p class="help">${sanitize(summary.selectedStatus?.description || 'Se mantiene dentro del rango proyectado por el escenario.')}</p>
+        <p class="help summary-average-note">Respecto al promedio por orden: ${sanitize(summary.averageSaleSignal?.text || '')}${summary.averageSaleSignal?.value ? ` (OT promedio: ${formatCurrency(summary.averageSaleSignal.value)})` : ''}.</p>
       </div>
     `;
   }
@@ -9324,7 +9325,7 @@ Objetivo
               ${materialRows || '<tr><td colspan="6" class="empty-state">No hay insumos agregados. Crea o importa registros desde la base de datos.</td></tr>'}
               <tr class="table-total materials-total-row">
                 <td colspan="4"><strong class="table-total-label">Total insumos de la orden</strong></td>
-                <td><strong>${formatCurrency(calc.quoteSummary.materialsTotal)}</strong></td>
+                <td class="table-total-value-cell"><strong class="table-total-value">${formatCurrency(calc.quoteSummary.materialsTotal)}</strong></td>
                 <td></td>
               </tr>
             </tbody>
@@ -9359,7 +9360,7 @@ Objetivo
               ${laborRows || '<tr><td colspan="7" class="empty-state">No hay mano de obra agregada.</td></tr>'}
               <tr class="table-total materials-total-row">
                 <td colspan="4"><strong class="table-total-label">Total mano de obra</strong></td>
-                <td><strong>${formatCurrency(calc.quoteSummary.laborTotal)}</strong></td>
+                <td class="table-total-value-cell"><strong class="table-total-value">${formatCurrency(calc.quoteSummary.laborTotal)}</strong></td>
                 <td></td>
                 <td></td>
               </tr>

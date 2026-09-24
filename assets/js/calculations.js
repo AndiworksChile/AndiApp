@@ -234,18 +234,18 @@ window.ERMCalc = (() => {
   function averageOrderSignal(price, projection) {
     const current = roundMoney(price);
     if (current >= asNumber(projection.idealAverageSalePerOrder)) {
-      return { level: 'ideal', text: 'Cumple el valor promedio ideal por orden' };
+      return { level: 'ideal', text: 'Cumple el valor promedio ideal por orden', value: asNumber(projection.idealAverageSalePerOrder) };
     }
     if (current >= asNumber(projection.targetAverageSalePerOrder)) {
-      return { level: 'target', text: 'Cumple el valor promedio de utilidad objetivo por orden' };
+      return { level: 'target', text: 'Cumple el valor promedio de utilidad objetivo por orden', value: asNumber(projection.targetAverageSalePerOrder) };
     }
     if (current >= asNumber(projection.minimumAverageSalePerOrder)) {
-      return { level: 'minimum', text: 'Cumple el valor promedio mínimo por orden' };
+      return { level: 'minimum', text: 'Cumple el valor promedio mínimo por orden', value: asNumber(projection.minimumAverageSalePerOrder) };
     }
     if (current >= asNumber(projection.breakEvenAverageSalePerOrder)) {
-      return { level: 'breakEven', text: 'Cubre el valor promedio de equilibrio por orden' };
+      return { level: 'breakEven', text: 'Cubre el valor promedio de equilibrio por orden', value: asNumber(projection.breakEvenAverageSalePerOrder) };
     }
-    return { level: 'low', text: 'Queda bajo el valor promedio proyectado por orden' };
+    return { level: 'low', text: 'Queda bajo el valor promedio proyectado por orden', value: asNumber(projection.breakEvenAverageSalePerOrder) };
   }
 
   function calculateQuote(state) {
