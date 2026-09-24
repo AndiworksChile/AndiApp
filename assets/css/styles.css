@@ -1771,10 +1771,6 @@ body.footer-in-view .sync-badge {
   .mobile-topbar { display: flex; gap: 6px; align-items: center; margin-bottom: 16px; }
   .mobile-topbar .mobile-menu-btn { flex: 1 1 auto; }
 
-  /* iOS/Android hacen zoom automático al enfocar un campo con font-size < 16px;
-     forzamos 16px en todos los campos para que el ancho de la app no cambie al escribir. */
-  input, select, textarea { font-size: 16px; }
-
   /* Asistencia: compactar ficha, tabla y análisis en móvil */
   .card { padding: 12px; }
   .attendance-actions { flex-wrap: wrap; flex-direction: column; }
