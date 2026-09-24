@@ -686,6 +686,8 @@ input[type="range"]:focus { outline: none; }
 .grid-3, .kpi-grid { grid-template-columns: repeat(3,minmax(0,1fr)); }
 .kpi-grid-4 { grid-template-columns: repeat(4,minmax(0,1fr)); }
 .grid-span-2 { grid-column: span 2; }
+/* Par de fechas: se mantienen una junto a la otra en todos los anchos, incluido móvil. */
+.date-pair-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 8px; }
 
 .database-form-layout { display: flex; flex-direction: column; gap: 8px; }
 .database-grid { display: grid; gap: 8px; }
@@ -764,6 +766,7 @@ td {
 }
 .table-total td { background: var(--panel-soft); font-weight: 700; border-top: 1px solid var(--ink); }
 .materials-total-row td strong { font-size: 16px; }
+.materials-total-row .table-total-label { font-size: 11px; }
 .table-compact th, .table-compact td { padding: 5px 7px; font-size: 12px; }
 .table-compact table tfoot strong { font-size: 14px; }
 
@@ -817,7 +820,10 @@ td {
 
 .unit-cost-inline { display: inline-flex; align-items: center; gap: 5px; }
 .waste-inline { display: flex; gap: 6px; margin-top: 5px; align-items: center; }
-.waste-inline-single .small { white-space: nowrap; }
+/* Compacta el mini-campo de merma para que no se salga de la celda angosta de la tabla. */
+.waste-inline-compact { flex-direction: column; align-items: stretch; gap: 2px; margin-top: 6px; }
+.waste-inline-compact .small { white-space: nowrap; font-size: 9px; }
+.waste-input-sm { max-width: 100%; width: 100%; padding: 3px 6px; font-size: 10px; }
 
 .finance-ledger-wrap { max-height: 58vh; overflow-y: auto; }
 .finance-ledger-wrap thead { position: sticky; top: 0; z-index: 6; }

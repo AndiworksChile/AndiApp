@@ -9164,9 +9164,9 @@ Objetivo
           </td>
           <td class="usage-cell">
             <input type="number" min="0" step="0.01" data-collection="quote.materials" data-id="${line.id}" data-key="quantity" value="${line.quantity}" />
-            <div class="waste-inline waste-inline-single">
+            <div class="waste-inline waste-inline-compact">
               <label class="small">Merma %</label>
-              <input class="input-sm" type="number" min="0" step="0.1" data-collection="quote.materials" data-id="${line.id}" data-key="wastePercent" value="${wastePercent}" />
+              <input class="input-sm waste-input-sm" type="number" min="0" step="0.1" data-collection="quote.materials" data-id="${line.id}" data-key="wastePercent" value="${wastePercent}" />
             </div>
           </td>
           <td class="cell-amount">
@@ -9237,7 +9237,7 @@ Objetivo
       <div class="card">
         <div class="section-title">
           <div>
-            <h2>Ficha técnica de la orden de trabajo</h2>
+            <h2>Ficha Técnica OT</h2>
           </div>
           <div class="inline-actions action-pair">
             <button class="btn btn-soft btn-add-line-icon" data-action="open-calculator" title="Calculadora" aria-label="Calculadora">${iconSvg('calculator')}</button>
@@ -9254,13 +9254,12 @@ Objetivo
                 <input data-model="quote.orderTitle" value="${sanitize(quote.orderTitle || '')}" placeholder="Ejemplo: Letrero principal cafetería" />
               </div>
               <div class="field-wide-2">
-                <label>Cliente desde base</label>
+                <label>Cliente asignado</label>
                 <select data-model="quote.customerId" ${isPrototype ? 'disabled' : ''}>
                   <option value="">Selecciona un cliente guardado</option>
                   <option value="__prospecto__" ${quote.customerId === '__prospecto__' ? 'selected' : ''}>Cliente prospecto (venta no concretada)</option>
                   ${state.contacts.map((contact) => `<option value="${contact.id}" class="${contact.isFriend ? 'option-friend' : ''}" style="${contact.isFriend ? 'color:#966d00;font-weight:700;' : ''}" ${quote.customerId === contact.id ? 'selected' : ''}>${sanitize(contact.name)}${contact.company ? ` · ${sanitize(contact.company)}` : ''}${contact.isFriend ? ' ★' : ''}</option>`).join('')}
                 </select>
-                <div class="small">${isPrototype ? 'Modo Prototipo: cliente deshabilitado para simulación.' : quote.customerId === '__prospecto__' ? 'Cliente prospecto: se puede presupuestar sin agregarlo a la base de clientes.' : 'La OT siempre debe quedar vinculada a un cliente de la base o marcarse como prospecto.'}</div>
               </div>
               <div>
                 <label class="label-with-tip"><span>Producto</span>${selectedProductDescription ? renderInfoTip(selectedProductDescription) : ''}</label>
@@ -9271,13 +9270,15 @@ Objetivo
                   ${quote.productName && !hasCurrentProductType && quote.productName !== 'Prototipo' ? `<option value="${sanitize(quote.productName)}" selected>${sanitize(quote.productName)}</option>` : ''}
                 </select>
               </div>
-              <div>
-                <label>Fecha de ingreso</label>
-                <input type="date" data-model="quote.quoteDate" value="${sanitize(quote.quoteDate)}" />
-              </div>
-              <div>
-                <label>Fecha de entrega estimada</label>
-                <input type="date" data-model="quote.estimatedDeliveryDate" value="${sanitize(quote.estimatedDeliveryDate || '')}" ${isPrototype ? 'disabled' : ''} />
+              <div class="field-wide-2 date-pair-grid">
+                <div>
+                  <label>Fecha de ingreso</label>
+                  <input type="date" data-model="quote.quoteDate" value="${sanitize(quote.quoteDate)}" />
+                </div>
+                <div>
+                  <label>Fecha de entrega estimada</label>
+                  <input type="date" data-model="quote.estimatedDeliveryDate" value="${sanitize(quote.estimatedDeliveryDate || '')}" ${isPrototype ? 'disabled' : ''} />
+                </div>
               </div>
               <div>
                 <label class="label-with-tip"><span>Estado</span>${renderInfoTip('Estado comercial de la orden. "Prospecto" es oportunidad abierta; "Presupuesto Aceptado" confirma aprobación; "Abonado (no entregado)" indica pago (total o parcial) recibido con entrega pendiente; "Entregado (pagado)" y "Entregado (no pagado)" cierran la entrega según si el pago está saldado.')}</label>
@@ -9313,7 +9314,6 @@ Objetivo
         <div class="section-title">
           <div>
             <h3>Insumos de la Orden de trabajo</h3>
-            <p class="subtitle">Selecciona el grupo y el insumo desde la base, ajusta cantidades y aplica merma solo cuando corresponda.</p>
           </div>
           <div class="inline-actions action-pair">
             <button class="btn btn-primary btn-add-line-icon" data-action="add-material-line" title="Agregar línea" aria-label="Agregar línea">${iconSvg('plus')}</button>
@@ -9335,7 +9335,7 @@ Objetivo
             <tbody>
               ${materialRows || '<tr><td colspan="6" class="empty-state">No hay insumos agregados. Crea o importa registros desde la base de datos.</td></tr>'}
               <tr class="table-total materials-total-row">
-                <td colspan="4"><strong>Total insumos de la orden</strong></td>
+                <td colspan="4"><strong class="table-total-label">Total insumos de la orden</strong></td>
                 <td><strong>${formatCurrency(calc.quoteSummary.materialsTotal)}</strong></td>
                 <td></td>
               </tr>
@@ -9371,7 +9371,7 @@ Objetivo
             <tbody>
               ${laborRows || '<tr><td colspan="7" class="empty-state">No hay mano de obra agregada.</td></tr>'}
               <tr class="table-total materials-total-row">
-                <td colspan="4"><strong>Total mano de obra</strong></td>
+                <td colspan="4"><strong class="table-total-label">Total mano de obra</strong></td>
                 <td><strong>${formatCurrency(calc.quoteSummary.laborTotal)}</strong></td>
                 <td></td>
                 <td></td>
@@ -9386,7 +9386,6 @@ Objetivo
         <div class="section-title">
           <div>
             <h3>CIF aplicado a la orden</h3>
-            <p class="subtitle">Se calcula automáticamente según las horas totales de mano de obra y la tasa CIF/h del escenario activo.</p>
           </div>
         </div>
         <div class="kpi-grid">
@@ -9394,14 +9393,12 @@ Objetivo
           <div class="kpi-box"><span>Tasa CIF/h</span><strong>${formatCurrency(calc.scenarioSummary.cifPerHour || 0)}</strong></div>
           <div class="kpi-box"><span>Total CIF aplicado</span><strong>${formatCurrency(calc.quoteSummary.cifTotal || 0)}</strong></div>
         </div>
-        <p class="help">Fórmula aplicada: horas de la orden × CIF por hora. Si cambias la mano de obra, este bloque se actualiza solo.</p>
       </div>
 
       <div class="card">
         <div class="section-title">
           <div>
             <h3>Cantidad de unidades</h3>
-            <p class="subtitle">El presupuesto calcula el costo de fabricar una pieza. Si el cliente compra varias unidades iguales, indícalo aquí. No aplica a logística y despacho.</p>
           </div>
         </div>
         <div class="grid-2">
@@ -9415,7 +9412,6 @@ Objetivo
           <div class="kpi-box"><span>Unidades</span><strong>${calc.quoteSummary.pieceQuantity || 1}</strong></div>
           <div class="kpi-box"><span>Subtotal producción (× unidades)</span><strong>${formatCurrency(calc.quoteSummary.productionCost || 0)}</strong></div>
         </div>
-        <p class="help">Fórmula aplicada: costo de una unidad × unidades. Luego se suma la logística y el despacho (sin multiplicar) para obtener el costo total real, que alimenta los precios de venta y el precio definido.</p>
       </div>
 
       <div class="card">
