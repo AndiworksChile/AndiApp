@@ -8482,7 +8482,6 @@ Objetivo
     const marginAchievement = getMarginAchievement(summary);
     const ivaAmount = Math.max(0, (Number(summary.effectiveGross) || 0) - (Number(summary.effectiveNet) || 0));
     const ivaLabelPercent = Math.round((Number(state.scenario?.ivaRate) || 0.19) * 100);
-    const productiveHoursPerDay = calc.scenarioSummary.availableHours / Math.max(1, (Number(state.scenario.periodMonths) || 1) * 22);
 
     refs.summaryPanel.innerHTML = `
       <div class="card summary-main-card ${selectedMeta.className} ${marginAchievement.tone === 'gold' ? 'summary-sheen' : ''}">
@@ -8517,16 +8516,6 @@ Objetivo
         <div class="summary-row"><span>Utilidad en CLP</span><strong>${formatCurrency(summary.contribution)}</strong></div>
         <p class="help"><span class="summary-selected-tag ${selectedMeta.className}">${selectedMeta.label}</span></p>
         <p class="help">${sanitize(summary.selectedStatus?.description || 'Se mantiene dentro del rango proyectado por el escenario.')}</p>
-        <p class="help">${sanitize(summary.averageSaleSignal?.text || '')}</p>
-      </div>
-
-      <div class="card card-soft">
-        <h3>Tasas del escenario</h3>
-        <div class="summary-row"><span>Horas productivas totales</span><strong>${calc.scenarioSummary.availableHours.toFixed(1)} h</strong></div>
-        <div class="summary-row"><span>Horas productivas por día</span><strong>${productiveHoursPerDay.toFixed(1)} h</strong></div>
-        <div class="summary-row"><span>Valor hora base</span><strong>${formatCurrency(calc.scenarioSummary.laborReferenceRate)}</strong></div>
-        <div class="summary-row"><span>CIF por hora</span><strong>${formatCurrency(calc.scenarioSummary.cifPerHour)}</strong></div>
-        <p class="help">Estas tasas se recalculan con el período, los sueldos y la eficiencia productiva definidos en el escenario.</p>
       </div>
     `;
   }
@@ -9208,7 +9197,7 @@ Objetivo
           </td>
           <td class="cell-with-meta compact-cost-cell">
             <div class="unit-cost-inline"><strong>${formatCurrency(line.realRate || 0)}</strong>${renderInfoTip(rateHelp)}</div>
-            <div class="small">${isExternal ? 'Sin corrección por eficiencia' : `Eficiencia: ${formatPercent(line.efficiencyApplied || scenario.efficiency)}`}</div>
+            <div class="small">${isExternal ? 'Sin corrección por eficiencia' : `E: ${formatPercent(line.efficiencyApplied || scenario.efficiency)}`}</div>
           </td>
           <td class="cell-amount"><strong>${formatCurrency(line.lineTotal)}</strong></td>
           <td class="labor-note-cell">
@@ -9276,7 +9265,7 @@ Objetivo
                   <input type="date" data-model="quote.quoteDate" value="${sanitize(quote.quoteDate)}" />
                 </div>
                 <div>
-                  <label>Fecha de entrega estimada</label>
+                  <label>Fecha de entrega</label>
                   <input type="date" data-model="quote.estimatedDeliveryDate" value="${sanitize(quote.estimatedDeliveryDate || '')}" ${isPrototype ? 'disabled' : ''} />
                 </div>
               </div>
@@ -9304,7 +9293,6 @@ Objetivo
 
           <div class="form-section">
             <div class="form-section-title">Descripción inicial</div>
-            <label>Descripción del producto o alcance</label>
             <textarea data-model="quote.description">${sanitize(quote.description)}</textarea>
           </div>
         </div>
@@ -9348,7 +9336,6 @@ Objetivo
         <div class="section-title">
           <div>
             <h3>Mano de obra</h3>
-            <p class="subtitle">La hora real productiva se corrige automáticamente según la eficiencia del escenario activo.</p>
           </div>
           <div class="inline-actions action-pair">
             <button class="btn btn-primary btn-add-line-icon" data-action="add-labor-line" title="Agregar línea" aria-label="Agregar línea">${iconSvg('plus')}</button>
@@ -9388,7 +9375,7 @@ Objetivo
             <h3>CIF aplicado a la orden</h3>
           </div>
         </div>
-        <div class="kpi-grid">
+        <div class="kpi-grid kpi-grid-compact-3">
           <div class="kpi-box"><span>Horas imputadas</span><strong>${Number(calc.quoteSummary.totalLaborHours || 0).toLocaleString('es-CL', { maximumFractionDigits: 2 })} h</strong></div>
           <div class="kpi-box"><span>Tasa CIF/h</span><strong>${formatCurrency(calc.scenarioSummary.cifPerHour || 0)}</strong></div>
           <div class="kpi-box"><span>Total CIF aplicado</span><strong>${formatCurrency(calc.quoteSummary.cifTotal || 0)}</strong></div>
@@ -9407,7 +9394,7 @@ Objetivo
             <input type="number" min="1" step="1" data-model="quote.pieceQuantity" value="${Math.max(1, Math.round(Number(quote.pieceQuantity) || 1))}" />
           </div>
         </div>
-        <div class="kpi-grid">
+        <div class="kpi-grid kpi-grid-compact-3">
           <div class="kpi-box"><span>Costo de una unidad</span><strong>${formatCurrency(calc.quoteSummary.unitCost || 0)}</strong></div>
           <div class="kpi-box"><span>Unidades</span><strong>${calc.quoteSummary.pieceQuantity || 1}</strong></div>
           <div class="kpi-box"><span>Subtotal producción (× unidades)</span><strong>${formatCurrency(calc.quoteSummary.productionCost || 0)}</strong></div>
@@ -9415,26 +9402,34 @@ Objetivo
       </div>
 
       <div class="card">
-        <div class="section-title">
-          <h3>Logística y despacho</h3>
-          <div class="inline-actions action-pair">
-            <button class="btn btn-soft btn-add-line-icon" data-action="clear-logistics" title="Limpiar logística" aria-label="Limpiar logística">${iconSvg('broom')}</button>
-          </div>
-        </div>
+        <details class="finance-section-details">
+          <summary>
+            Logística y despacho
+            <span class="logistics-summary-badge">${sanitize({ retiro: 'Retiro en taller', metro: 'Entrega en Metro', domicilio: 'Entrega a domicilio', starken: 'Envío por Starken' }[quote.logistics.mode] || 'Retiro en taller')} · ${formatCurrency(calc.quoteSummary.logisticsTotal || 0)}</span>
+          </summary>
+          <div class="finance-section-body">
+            <div class="section-title">
+              <div></div>
+              <div class="inline-actions action-pair">
+                <button class="btn btn-soft btn-add-line-icon" data-action="clear-logistics" title="Limpiar logística" aria-label="Limpiar logística">${iconSvg('broom')}</button>
+              </div>
+            </div>
 
-        <div class="grid-2">
-          <div>
-            <label>Modalidad</label>
-            <select data-model="quote.logistics.mode">
-              <option value="retiro" ${quote.logistics.mode === 'retiro' ? 'selected' : ''}>Retiro en taller</option>
-              <option value="metro" ${quote.logistics.mode === 'metro' ? 'selected' : ''}>Entrega en Metro</option>
-              <option value="domicilio" ${quote.logistics.mode === 'domicilio' ? 'selected' : ''}>Entrega a domicilio</option>
-              <option value="starken" ${quote.logistics.mode === 'starken' ? 'selected' : ''}>Envío por Starken</option>
-            </select>
-          </div>
-        </div>
+            <div class="grid-2">
+              <div>
+                <label>Modalidad</label>
+                <select data-model="quote.logistics.mode">
+                  <option value="retiro" ${quote.logistics.mode === 'retiro' ? 'selected' : ''}>Retiro en taller</option>
+                  <option value="metro" ${quote.logistics.mode === 'metro' ? 'selected' : ''}>Entrega en Metro</option>
+                  <option value="domicilio" ${quote.logistics.mode === 'domicilio' ? 'selected' : ''}>Entrega a domicilio</option>
+                  <option value="starken" ${quote.logistics.mode === 'starken' ? 'selected' : ''}>Envío por Starken</option>
+                </select>
+              </div>
+            </div>
 
-        ${renderLogisticsFields(quote.logistics, scenario, calc)}
+            ${renderLogisticsFields(quote.logistics, scenario, calc)}
+          </div>
+        </details>
       </div>
 
       <div class="card">
