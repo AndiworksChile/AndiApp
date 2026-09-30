@@ -2497,6 +2497,10 @@ Objetivo
       .join('');
   }
 
+  function goalStatusLabel(status) {
+    return ({ 'en-periodo': 'En período', logrado: 'Logrado', 'logrado-en-transcurso': 'Logrado en el transcurso', 'no-logrado': 'No logrado' })[status] || 'En período';
+  }
+
   function syncAttendanceChronometer() {
     if (attendanceChronoTimer) {
       window.clearInterval(attendanceChronoTimer);
@@ -2793,12 +2797,35 @@ Objetivo
     window.alert(`Botón de guardado: todo actualizado correctamente.\n\n${detail}`);
   }
 
-  function renderSaveFeedback(slotKey) {
-    const map = state.ui.saveFeedbackMap || {};
-    const payload = map[slotKey];
+  function renderSaveFeedbackInner(slotKey) {
+    const payload = (state.ui.saveFeedbackMap || {})[slotKey];
     if (!payload) return '';
     const cls = payload.status === 'ok' ? 'ok' : 'error';
     return `<span class="save-feedback ${cls}">${sanitize(payload.message || '')}</span>`;
+  }
+
+  function renderSaveFeedback(slotKey) {
+    return `<span data-save-slot="${slotKey}">${renderSaveFeedbackInner(slotKey)}</span>`;
+  }
+
+  function isEditingInMainPanel() {
+    const focused = document.activeElement;
+    return Boolean(focused && (focused.tagName === 'INPUT' || focused.tagName === 'TEXTAREA' || focused.tagName === 'SELECT') && refs.mainPanel?.contains(focused));
+  }
+
+  // Si el usuario está escribiendo, solo se actualiza el aviso en su sitio: un render()
+  // completo reemplaza el DOM y la casilla en edición pierde el foco.
+  // Un render() inmediato al salir de una casilla reemplaza el DOM antes de que termine el toque
+  // sobre el botón siguiente y ese primer toque se pierde; se difiere y se omite si ya se está editando otro campo.
+  function scheduleSafeRender() {
+    window.setTimeout(() => { if (!isEditingInMainPanel()) render(); }, 250);
+  }
+
+  function refreshSaveFeedback(slotKey) {
+    if (!isEditingInMainPanel()) { render(); return; }
+    document.querySelectorAll(`[data-save-slot="${slotKey}"]`).forEach((node) => {
+      node.innerHTML = renderSaveFeedbackInner(slotKey);
+    });
   }
 
   function triggerSaveFeedback(slotKey, baseKey) {
@@ -2816,13 +2843,10 @@ Objetivo
     saveFeedbackTimers[slotKey] = window.setTimeout(() => {
       if (!state.ui.saveFeedbackMap) return;
       delete state.ui.saveFeedbackMap[slotKey];
-      // Skip render if an interactive element has focus to avoid stealing it mid-typing
-      const focused = document.activeElement;
-      const isEditing = focused && (focused.tagName === 'INPUT' || focused.tagName === 'TEXTAREA' || focused.tagName === 'SELECT') && refs.mainPanel?.contains(focused);
-      if (!isEditing) render();
+      refreshSaveFeedback(slotKey);
     }, 2200);
 
-    render();
+    refreshSaveFeedback(slotKey);
   }
 
   function openExternalLink(url) {
@@ -3000,6 +3024,9 @@ Objetivo
       const viewBtn = event.target.closest('[data-view]');
       if (viewBtn) {
         state.currentView = viewBtn.dataset.view;
+        if (state.currentView === 'expenses') state.ui.expenseMobileView = 'list';
+        if (state.currentView === 'contacts') state.ui.contactsMobileView = 'menu';
+        if (state.currentView === 'database') { state.ui.databaseMobileView = 'menu'; state.ui.providerReturn = false; }
         if (state.currentView === 'attendance') {
           state.ui.attendanceAnalyticsMonthKey = getAttendanceMonthKeyFromDate(new Date());
         }
@@ -3016,6 +3043,7 @@ Objetivo
       const actionBtn = event.target.closest('[data-action]');
       if (!actionBtn) return;
       const action = actionBtn.dataset.action;
+      if (actionBtn.dataset.closePicker) closePickerModal();
 
       // Prevent non-button action wrappers from stealing focus when user clicks inputs.
       const clickedEditable = event.target.closest('input, textarea, select');
@@ -3135,6 +3163,46 @@ Objetivo
         render();
       }
 
+      if (action === 'db-open-view') {
+        state.ui.databaseMobileView = actionBtn.dataset.viewKey || 'menu';
+        if (state.ui.databaseMobileView === 'menu') state.ui.providerReturn = false;
+        render();
+        window.scrollTo(0, 0);
+        return;
+      }
+      if (action === 'open-db-group-picker') { openDbGroupPicker(); return; }
+      if (action === 'open-db-provider-picker') { openDbProviderPicker(); return; }
+      if (action === 'open-db-filter-picker') { openDbFilterPicker(); return; }
+      if (action === 'view-material') { openMaterialDetail(actionBtn.dataset.id); return; }
+      if (action === 'view-product-type') { openProductTypeDetail(actionBtn.dataset.id); return; }
+      if (action === 'view-provider') { openProviderDetail(actionBtn.dataset.id); return; }
+
+      if (action === 'pick-db-group') {
+        const group = actionBtn.dataset.group || '';
+        state.ui.databaseDraft = { ...(state.ui.databaseDraft || {}), groupSelection: group, group: group === '__new__' ? '' : group };
+        render();
+        return;
+      }
+
+      if (action === 'pick-db-provider') {
+        const id = actionBtn.dataset.providerId || '';
+        if (id === '__new__') {
+          state.ui.providerReturn = true;
+          state.ui.databaseMobileView = 'providers';
+          render();
+          window.scrollTo(0, 0);
+          return;
+        }
+        const provider = (state.database.externalResources || []).find((item) => item.id === id);
+        state.ui.databaseDraft = {
+          ...(state.ui.databaseDraft || {}),
+          provider: provider ? provider.name : PROVIDER_PRIVATE,
+          supplierContact: provider ? providerContactText(provider) : ''
+        };
+        render();
+        return;
+      }
+
       if (action === 'set-database-section') {
         state.ui.databaseSection = actionBtn.dataset.section || 'materials';
         render();
@@ -3145,12 +3213,23 @@ Objetivo
         render();
       }
 
+      if (action === 'expense-back-to-list') {
+        state.ui.expenseMobileView = 'list';
+        render();
+        return;
+      }
+
+      if (action === 'open-expense-file-menu') { openExpenseFileMenu(actionBtn.dataset.entryId); return; }
+      if (action === 'open-expense-notes') { openExpenseNotes(actionBtn.dataset.entryId); return; }
+      if (action === 'open-expense-color-picker') { openExpenseColorPicker(); return; }
+
       if (action === 'select-expense-card') {
         const selectedId = actionBtn.dataset.id || null;
         const selected = (state.expenses.cards || []).find((card) => card.id === selectedId);
         if (!selected) return;
         state.ui.selectedExpenseId = selected.id;
         state.ui.expenseDraft = JSON.parse(JSON.stringify(selected));
+        state.ui.expenseMobileView = 'detail';
         render();
       }
 
@@ -3165,6 +3244,7 @@ Objetivo
         state.expenses.cards.unshift(card);
         state.ui.selectedExpenseId = card.id;
         state.ui.expenseDraft = JSON.parse(JSON.stringify(card));
+        state.ui.expenseMobileView = 'detail';
         stampBaseUpdate('expenses');
         render();
       }
@@ -3186,6 +3266,7 @@ Objetivo
         state.ui.selectedExpenseId = state.expenses.cards[0]?.id || null;
         const selected = (state.expenses.cards || []).find((card) => card.id === state.ui.selectedExpenseId);
         state.ui.expenseDraft = selected ? JSON.parse(JSON.stringify(selected)) : null;
+        state.ui.expenseMobileView = 'list';
         stampBaseUpdate('expenses');
         render();
       }
@@ -3360,9 +3441,16 @@ Objetivo
         render();
       }
 
+      if (action === 'open-scenario-item') {
+        openScenarioItemModal(actionBtn.dataset.kind, actionBtn.dataset.id);
+        return;
+      }
+
       if (action === 'add-fixed-cost') {
-        state.scenario.fixedCosts.push({ id: uid('fc'), name: 'Nuevo costo', periodicity: 'mensual', amount: 0 });
+        const id = uid('fc');
+        state.scenario.fixedCosts.push({ id, name: 'Nuevo costo', periodicity: 'mensual', amount: 0 });
         render();
+        if (isMobileViewport()) openScenarioItemModal('fixedCost', id);
       }
 
       if (action === 'remove-fixed-cost') {
@@ -3377,8 +3465,10 @@ Objetivo
       }
 
       if (action === 'add-employee') {
-        state.scenario.employees.push({ id: uid('emp'), name: 'Nuevo empleado', hourlyRate: 0, hoursPerMonth: 160 });
+        const id = uid('emp');
+        state.scenario.employees.push({ id, name: 'Nuevo empleado', hourlyRate: 0, hoursPerMonth: 160 });
         render();
+        if (isMobileViewport()) openScenarioItemModal('employee', id);
       }
 
       if (action === 'remove-employee') {
@@ -3558,11 +3648,24 @@ Objetivo
         render();
       }
 
+      if (action === 'contacts-open-new') { state.ui.contactsMobileView = 'new'; render(); return; }
+      if (action === 'contacts-open-agenda') { state.ui.contactsMobileView = 'agenda'; render(); return; }
+      if (action === 'contacts-back-to-menu') {
+        state.ui.editingContactId = null;
+        state.ui.contactDraft = null;
+        state.ui.contactsMobileView = 'menu';
+        render();
+        return;
+      }
+      if (action === 'view-contact') { openContactDetail(actionBtn.dataset.id); return; }
+
       if (action === 'edit-contact') {
+        state.ui.contactsMobileView = 'new';
         state.ui.editingContactId = actionBtn.dataset.id;
         state.ui.contactDraft = { ...(state.contacts.find((item) => item.id === actionBtn.dataset.id) || {}) };
         state.currentView = 'contacts';
         render();
+        window.scrollTo(0, 0);
       }
 
       if (action === 'append-whatsapp') {
@@ -3615,6 +3718,7 @@ Objetivo
       if (action === 'cancel-edit-contact') {
         state.ui.editingContactId = null;
         state.ui.contactDraft = null;
+        state.ui.contactsMobileView = 'agenda';
         render();
       }
 
@@ -3845,6 +3949,7 @@ Objetivo
         state.ui.editingProductTypeId = actionBtn.dataset.id;
         state.ui.productTypeDraft = { ...(state.database.productTypes.find((item) => item.id === actionBtn.dataset.id) || {}) };
         render();
+        window.scrollTo(0, 0);
       }
 
       if (action === 'delete-product-type') {
@@ -3870,7 +3975,16 @@ Objetivo
       }
 
       if (action === 'save-external-resource') {
+        const pendingName = String(state.ui.externalResourceDraft?.name || '').trim();
         saveExternalResourceFromForm();
+        const saved = isMobileViewport() && state.ui.providerReturn ? findRegisteredProvider(pendingName) : null;
+        if (saved) {
+          state.ui.providerReturn = false;
+          state.ui.databaseMobileView = 'new';
+          state.ui.databaseDraft = { ...(state.ui.databaseDraft || {}), provider: saved.name, supplierContact: providerContactText(saved) };
+          render();
+          window.scrollTo(0, 0);
+        }
       }
 
       if (action === 'export-external-resources') {
@@ -3885,6 +3999,7 @@ Objetivo
         state.ui.editingExternalResourceId = actionBtn.dataset.id;
         state.ui.externalResourceDraft = { ...(state.database.externalResources.find((item) => item.id === actionBtn.dataset.id) || {}) };
         render();
+        window.scrollTo(0, 0);
       }
 
       if (action === 'toggle-external-resource-status') {
@@ -4680,7 +4795,9 @@ Objetivo
         state.ui.editingMaterialId = actionBtn.dataset.id;
         state.ui.databaseDraft = { ...(state.database.materials.find((item) => item.id === actionBtn.dataset.id) || {}) };
         state.currentView = 'database';
+        state.ui.databaseMobileView = 'new';
         render();
+        window.scrollTo(0, 0);
       }
 
       if (action === 'duplicate-material') {
@@ -4693,8 +4810,10 @@ Objetivo
             createdAt: new Date().toLocaleDateString('es-CL')
           };
           state.currentView = 'database';
+          state.ui.databaseMobileView = 'new';
         }
         render();
+        window.scrollTo(0, 0);
       }
 
       if (action === 'toggle-material-status') {
@@ -4719,6 +4838,7 @@ Objetivo
       if (action === 'cancel-edit-material') {
         state.ui.editingMaterialId = null;
         state.ui.databaseDraft = null;
+        state.ui.databaseMobileView = 'table';
         render();
       }
 
@@ -5168,7 +5288,7 @@ Objetivo
             [field]: field === 'amount' ? (Number(parseValue(target)) || 0) : parseValue(target)
           };
         });
-        render();
+        scheduleSafeRender();
         return;
       }
 
@@ -5180,6 +5300,9 @@ Objetivo
         if (target.dataset.dbDraft === 'groupSelection' && target.value !== '__new__') {
           state.ui.databaseDraft.group = target.value;
         }
+        const dbKey = target.dataset.dbDraft;
+        if (dbKey === 'calculationUnit' || dbKey === 'groupSelection') render();
+        else if (['baseCost', 'widthCm', 'heightCm', 'yieldQuantity', 'yieldUnit'].includes(dbKey)) refreshMobileFormula();
         return;
       }
 
@@ -5246,6 +5369,7 @@ Objetivo
         stampBaseUpdate('scenario');
         window.ERMStorage.save(state);
         render();
+        if (target.closest('#picker-modal')) openScenarioItemModal('goal', goalId);
         return;
       }
 
@@ -5373,6 +5497,7 @@ Objetivo
         const isScenarioCollection = String(target.dataset.collection || '').startsWith('scenario.');
         if (mustRerenderMain || (isScenarioCollection && state.currentView === 'scenario')) {
           render();
+          if (isScenarioCollection) refreshScenarioItemModal();
           return;
         }
 
@@ -5413,6 +5538,11 @@ Objetivo
         }
       }
 
+      if (event.target?.dataset?.dbDraft && ['baseCost', 'widthCm', 'heightCm', 'yieldQuantity'].includes(event.target.dataset.dbDraft) && document.querySelector('.m-formula')) {
+        state.ui.databaseDraft = { ...(state.ui.databaseDraft || {}), [event.target.dataset.dbDraft]: parseValue(event.target) };
+        refreshMobileFormula();
+      }
+
       // Auto-save edits inside Gastos entries (debounced)
       if (event.target && event.target.dataset && event.target.dataset.expenseEntryField) {
         const entryId = String(event.target.dataset.entryId || '');
@@ -5449,6 +5579,7 @@ Objetivo
       const t = event.target;
       if (t && t.tagName === 'INPUT' && t.dataset && t.dataset.format === 'clp') {
         unformatInputNumberDisplay(t);
+        if (t.value === '0') t.select();
       }
     });
 
@@ -5932,6 +6063,7 @@ Objetivo
     state.ui.editingMaterialId = null;
     state.ui.databaseDraft = null;
     state.ui.databaseFilter = 'Todos';
+    state.ui.databaseMobileView = 'table';
     stampBaseUpdate('database');
     render();
   }
@@ -6399,6 +6531,7 @@ Objetivo
 
     state.ui.editingContactId = null;
     state.ui.contactDraft = null;
+    state.ui.contactsMobileView = 'agenda';
     stampBaseUpdate('contacts');
     render();
   }
@@ -8602,6 +8735,24 @@ Objetivo
       `;
     }).join('');
 
+    const isMobile = isMobileViewport();
+    const fixedCards = scenario.fixedCosts.map((item) => {
+      const factor = window.ERMCalc.periodicityFactor(item.periodicity, scenario.periodMonths);
+      return `
+        <div class="scn-mini-card" role="button" tabindex="0" data-action="open-scenario-item" data-kind="fixedCost" data-id="${item.id}">
+          <div class="scn-mini-main"><strong>${sanitize(item.name || 'Sin nombre')}</strong><span>${sanitize(periodicityLabel(item.periodicity))} · ${formatCurrency(item.amount || 0)} · factor ${factor.toFixed(2)}</span></div>
+          <div class="scn-mini-value"><strong>${formatCurrency(item.amount * factor)}</strong><span>en período</span></div>
+        </div>`;
+    }).join('');
+    const employeeCards = scenario.employees.map((employee) => {
+      const monthlySalary = employee.hourlyRate * employee.hoursPerMonth;
+      return `
+        <div class="scn-mini-card" role="button" tabindex="0" data-action="open-scenario-item" data-kind="employee" data-id="${employee.id}">
+          <div class="scn-mini-main"><strong>${sanitize(employee.name || 'Sin nombre')}</strong><span>${formatCurrency(employee.hourlyRate || 0)}/h · ${Number(employee.hoursPerMonth || 0)} h/mes</span></div>
+          <div class="scn-mini-value"><strong>${formatCurrency(monthlySalary)}</strong><span>mensual · ${formatCurrency(monthlySalary * scenario.periodMonths)} período</span></div>
+        </div>`;
+    }).join('');
+
     const employeeRows = scenario.employees.map((employee) => {
       const monthlySalary = employee.hourlyRate * employee.hoursPerMonth;
       const periodSalary = monthlySalary * scenario.periodMonths;
@@ -8667,6 +8818,11 @@ Objetivo
             <button class="btn btn-soft btn-add-line-icon" data-action="clear-fixed-costs" title="Limpiar tabla" aria-label="Limpiar tabla">${iconSvg('broom')}</button>
           </div>
         </div>
+        ${isMobile ? `
+        <div class="scn-mini-list">
+          ${fixedCards || '<div class="empty-state">Sin costos. Agrega uno con +.</div>'}
+          <div class="scn-mini-total"><span>Total CIF del período</span><strong>${formatCurrency(calc.scenarioSummary.fixedCostsTotal)}</strong></div>
+        </div>` : `
         <div class="table-wrap">
           <table>
             <thead>
@@ -8688,7 +8844,7 @@ Objetivo
               </tr>
             </tbody>
           </table>
-        </div>
+        </div>`}
       </div>
 
       <div class="card">
@@ -8702,6 +8858,11 @@ Objetivo
             <button class="btn btn-soft btn-add-line-icon" data-action="clear-employees" title="Limpiar tabla" aria-label="Limpiar tabla">${iconSvg('broom')}</button>
           </div>
         </div>
+        ${isMobile ? `
+        <div class="scn-mini-list">
+          ${employeeCards || '<div class="empty-state">Sin integrantes. Agrega uno con +.</div>'}
+          <div class="scn-mini-total"><span>Totales · ${totalHoursPerMonth.toFixed(1)} h/mes</span><strong>${formatCurrency(totalMonthlySalaries)}<em>${formatCurrency(totalPeriodSalaries)} período</em></strong></div>
+        </div>` : `
         <div class="table-wrap">
           <table>
             <thead>
@@ -8726,7 +8887,7 @@ Objetivo
               </tr>
             </tbody>
           </table>
-        </div>
+        </div>`}
       </div>
 
       <div class="card">
@@ -8865,6 +9026,14 @@ Objetivo
 
         <p class="help goal-summary-mini">Resumen: ${goalsSummary.total} total · ${goalsSummary.achieved} logrado · ${goalsSummary.achievedDuring} logrado en transcurso · ${goalsSummary.notAchieved} no logrado · ${goalsSummary.inPeriod} en período</p>
 
+        ${isMobile ? `
+        <div class="scn-mini-list">
+          ${goals.map((item) => `
+            <div class="scn-mini-card" role="button" tabindex="0" data-action="open-scenario-item" data-kind="goal" data-id="${item.id}">
+              <div class="scn-mini-main"><strong class="goal-status-${item.status}">${sanitize(item.title)}</strong><span>${sanitize(item.description || '-')}</span></div>
+              <div class="scn-mini-value"><strong class="goal-status-${item.status}">${sanitize(goalStatusLabel(item.status))}</strong><span>cierre ${sanitize(formatGoalDate(item.autoCloseAt))}</span></div>
+            </div>`).join('') || '<div class="empty-state">Aún no has agregado objetivos personales para este período.</div>'}
+        </div>` : `
         <div class="table-wrap table-compact">
           <table>
             <thead>
@@ -8901,11 +9070,11 @@ Objetivo
               `).join('') || '<tr><td colspan="7" class="empty-state">Aún no has agregado objetivos personales para este período.</td></tr>'}
             </tbody>
           </table>
-        </div>
+        </div>`}
       </div>
       </fieldset>
 
-      <div class="card">
+      <div class="card scenario-confirm-card">
         <div class="section-title">
           <div>
             <h3>Confirmación del escenario</h3>
@@ -9785,6 +9954,27 @@ Objetivo
     };
   }
 
+  function openContactDetail(contactId) {
+    const item = state.contacts.find((c) => c.id === contactId);
+    if (!item) return;
+    const row = (label, value) => `<div class="attendance-record-modal-row"><span>${label}</span><span>${value || '—'}</span></div>`;
+    const whatsapps = String(item.whatsapp || '').split(/[,;|]/).map((l) => l.trim()).filter(Boolean);
+    const contactos = [...whatsapps.map((w) => `WhatsApp: ${sanitize(w)}`), item.email ? `Correo: ${sanitize(item.email)}` : ''].filter(Boolean).join('<br>');
+    const redes = [item.instagram ? `Instagram: ${sanitize(item.instagram)}` : '', item.facebook ? `Facebook: ${sanitize(item.facebook)}` : '', item.website ? `Web: ${sanitize(item.website)}` : ''].filter(Boolean).join('<br>');
+    openPickerModal(`Cliente #${formatNumber(item.clientNumber)}`, `
+      ${row('Nombre cliente', `${sanitize(item.name)}${item.isFriend ? ' ✦' : ''}<br><span class="small">${sanitize(item.type === 'empresa' ? (item.company || 'Empresa') : 'Persona')} · RUT: ${sanitize(item.rut || '-')}</span>`)}
+      ${row('1er contacto', sanitize(item.firstContactDate || ''))}
+      ${row('Dirección', [sanitize(item.address || ''), sanitize(item.district || '')].filter(Boolean).join('<br>'))}
+      ${row('Contactos', contactos)}
+      ${row('Redes / web', redes)}
+      ${row('Comentarios', sanitize(item.comments || ''))}
+      <div class="attendance-record-modal-actions">
+        <button class="btn btn-soft" data-action="edit-contact" data-id="${item.id}" data-close-picker="1">${iconSvg('edit')} Editar</button>
+        <button class="btn btn-soft" data-action="delete-contact" data-id="${item.id}" data-close-picker="1">${iconSvg('trash')} Eliminar</button>
+      </div>
+    `);
+  }
+
   function renderContacts() {
     const editing = state.contacts.find((item) => item.id === state.ui.editingContactId) || {};
     const draft = state.ui.contactDraft || {};
@@ -9855,16 +10045,7 @@ Objetivo
       `;
       }).join('');
 
-    return `
-      <div class="card">
-        <div class="section-title">
-          <div>
-            <h2>Ficha de Cliente nuevo</h2>
-            <p class="subtitle">Registra tus clientes para reutilizar su información más adelante en despachos, envíos y órdenes de trabajo.</p>
-          </div>
-        </div>
-
-        <div class="database-form-layout">
+    const formSections = `
           <div class="form-section">
             <div class="form-section-title"><span class="form-step">1</span> Cliente nuevo</div>
             <div class="database-grid database-grid-3 compact-grid">
@@ -9898,7 +10079,7 @@ Objetivo
                 <label>Fecha de primer contacto</label>
                 <input type="date" data-contact-draft="firstContactDate" value="${sanitize(form.firstContactDate)}" />
               </div>
-              <div class="field-wide-2 form-pair-grid">
+              <div class="field-wide-2 form-pair-grid contact-span-2">
                 <div>
                   <label>Dirección</label>
                   <input data-contact-draft="address" value="${sanitize(form.address)}" placeholder="Dirección principal" />
@@ -9914,7 +10095,7 @@ Objetivo
           <div class="form-section">
             <div class="form-section-title"><span class="form-step">2</span> Contacto</div>
             <div class="database-grid database-grid-3 compact-grid">
-              <div>
+              <div class="contact-span-2">
                 <label>Whatsapp</label>
                 <div class="field-with-action">
                   <input data-contact-draft="whatsapp" value="${sanitize(form.whatsapp)}" placeholder="+56 ..." />
@@ -9946,13 +10127,72 @@ Objetivo
             <label>Observaciones o contexto comercial</label>
             <textarea data-contact-draft="comments" placeholder="Preferencias, antecedentes o notas importantes del cliente.">${sanitize(form.comments)}</textarea>
           </div>
-        </div>
+    `;
 
+    const formActions = `
         <div class="inline-actions action-pair">
           <button class="btn btn-primary" data-action="save-contact">${state.ui.editingContactId ? 'Actualizar cliente' : 'Guardar cliente'}</button>
           <button class="btn btn-soft btn-icon" data-action="clear-contact-form" title="Limpiar ficha" aria-label="Limpiar ficha">${iconSvg('broom')}</button>
           ${state.ui.editingContactId ? '<button class="btn btn-soft" data-action="cancel-edit-contact">Cancelar edición</button>' : ''}
+        </div>`;
+
+    if (isMobileViewport()) {
+      const view = state.ui.contactsMobileView || 'menu';
+      const backBtn = '<button type="button" class="btn btn-soft btn-add-line-icon" data-action="contacts-back-to-menu" title="Volver" aria-label="Volver">‹</button>';
+      if (view === 'new') {
+        return `
+          <div class="card contacts-form">
+            <div class="section-title"><div class="expense-detail-title">${backBtn}<h2>${state.ui.editingContactId ? 'Editar cliente' : 'Cliente nuevo'}</h2></div></div>
+            <div class="database-form-layout">${formSections}</div>
+            ${formActions}
+          </div>
+        `;
+      }
+      if (view === 'agenda') {
+        const agendaRows = [...state.contacts]
+          .sort((a, b) => (Number(a.clientNumber) || 0) - (Number(b.clientNumber) || 0))
+          .map((item) => `
+            <tr class="attendance-row-clickable" data-action="view-contact" data-id="${item.id}">
+              <td class="client-number-cell"><strong>#${formatNumber(item.clientNumber)}</strong></td>
+              <td><strong class="${item.isFriend ? 'client-friend-name' : ''}">${sanitize(item.name)}${item.isFriend ? '<span class="client-friend-glint"> ✦</span>' : ''}</strong></td>
+            </tr>`).join('');
+        return `
+          <div class="card">
+            <div class="section-title"><div class="expense-detail-title">${backBtn}<h2>Agenda de clientes</h2></div><span class="pill ok">${state.contacts.length}</span></div>
+            <div class="table-wrap table-compact">
+              <table class="contacts-mobile-table">
+                <thead><tr><th>N°</th><th>Cliente</th></tr></thead>
+                <tbody>${agendaRows || '<tr><td colspan="2" class="empty-state">Aún no hay clientes guardados.</td></tr>'}</tbody>
+              </table>
+            </div>
+          </div>
+        `;
+      }
+      return `
+        <div class="card">
+          <div class="section-title"><div><h2>Clientes</h2></div></div>
+          <div class="mobile-home-menu">
+            <button type="button" class="btn mobile-home-btn" data-action="contacts-open-new"><span>Cliente nuevo</span></button>
+            <button type="button" class="btn mobile-home-btn" data-action="contacts-open-agenda"><span>Agenda de clientes</span></button>
+          </div>
         </div>
+      `;
+    }
+
+    return `
+      <div class="card">
+        <div class="section-title">
+          <div>
+            <h2>Ficha de Cliente nuevo</h2>
+            <p class="subtitle">Registra tus clientes para reutilizar su información más adelante en despachos, envíos y órdenes de trabajo.</p>
+          </div>
+        </div>
+
+        <div class="database-form-layout">
+          ${formSections}
+        </div>
+
+        ${formActions}
       </div>
 
       <div class="card">
@@ -11676,6 +11916,122 @@ Objetivo
     )).join('');
   }
 
+  const SVG_FOLDER = '<svg class="expense-svg-icon" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M10 4H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-8l-2-2z"/></svg>';
+  const SVG_COMMENT = '<svg class="expense-svg-icon" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M4 3h16a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H9l-5 4v-4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z"/></svg>';
+
+  function renderExpensesMobile(cards, draft, draftSummary) {
+    const showDetail = state.ui.expenseMobileView === 'detail' && draft;
+    if (!showDetail) {
+      return `
+        <div class="card">
+          <div class="section-title">
+            <div><h2>Módulo 7 · Gastos</h2></div>
+            <button class="btn btn-primary btn-add-line-icon" data-action="add-expense-card" title="Nueva card" aria-label="Nueva card">${iconSvg('plus')}</button>
+          </div>
+          <div class="expense-grid">${cards}</div>
+        </div>
+      `;
+    }
+
+    const rows = (draft.entries || []).map((entry, index) => {
+      const isPaid = entry.status === 'pagado';
+      const attachment = getPrimaryAttachment(entry, legacyExpenseAttachment);
+      const hasPdf = Boolean(attachment);
+      const hasNote = Boolean(String(entry.notes || '').trim());
+      return `
+        <tr>
+          <td class="expense-m-num">${index + 1}</td>
+          <td><input type="text" inputmode="numeric" data-format="clp" data-entry-id="${entry.id}" data-expense-entry-field="amount" value="${formatNumber(Number(entry.amount) || 0)}" /></td>
+          <td><input type="date" data-entry-id="${entry.id}" data-expense-entry-field="date" value="${sanitize(entry.date || '')}" /></td>
+          <td><button type="button" class="expense-icon-btn ${isPaid ? 'ok' : 'bad'}" data-action="toggle-expense-entry-status" data-entry-id="${entry.id}" title="${isPaid ? 'Pagado' : 'No pagado'}" aria-label="${isPaid ? 'Pagado' : 'No pagado'}">${isPaid ? iconSvg('statusOn') : iconSvg('statusOff')}</button></td>
+          <td>
+            <button type="button" class="expense-icon-btn ${hasPdf ? 'ok' : 'bad'}" data-action="open-expense-file-menu" data-entry-id="${entry.id}" title="${hasPdf ? 'Comprobante adjunto' : 'Sin comprobante'}" aria-label="Comprobante">${SVG_FOLDER}</button>
+            <input id="expense-pdf-input-${entry.id}" class="expense-file-hidden-input" type="file" accept="application/pdf,.pdf" data-expense-entry-pdf="true" data-entry-id="${entry.id}" ${hasPdf ? 'disabled' : ''} />
+          </td>
+          <td><button type="button" class="expense-icon-btn ${hasNote ? 'has-note' : ''}" data-action="open-expense-notes" data-entry-id="${entry.id}" title="Observaciones" aria-label="Observaciones">${SVG_COMMENT}</button></td>
+        </tr>
+      `;
+    }).join('');
+
+    return `
+      <div class="card">
+        <div class="section-title expense-detail-head">
+          <div class="expense-detail-title">
+            <button type="button" class="btn btn-soft btn-add-line-icon" data-action="expense-back-to-list" title="Volver a Gastos" aria-label="Volver a Gastos">‹</button>
+            <h3>Detalle de Gasto - ${sanitize(draft.name || 'Sin titulo')} ${sanitize(draft.baseYear || '')}</h3>
+          </div>
+          <div class="inline-actions">
+            <button type="button" class="expense-color-dot" data-action="open-expense-color-picker" style="--swatch-color:${sanitize(draft.color || '#2563eb')}" title="Cambiar color" aria-label="Cambiar color"></button>
+            <button class="btn btn-soft btn-add-line-icon" data-action="delete-expense-card" data-id="${draft.id}" title="Eliminar card" aria-label="Eliminar card">${iconSvg('trash')}</button>
+          </div>
+        </div>
+
+        <div class="expense-m-fields">
+          <div class="expense-m-pair">
+            <div><label>Nombre Gasto</label><input data-expense-draft="name" value="${sanitize(draft.name || '')}" /></div>
+            <div><label>Año base</label><input data-expense-draft="baseYear" inputmode="numeric" value="${sanitize(draft.baseYear || '')}" placeholder="2026" /></div>
+          </div>
+          <div><label>Descripción de Gasto</label><input data-expense-draft="description" maxlength="220" value="${sanitize(draft.description || '')}" /></div>
+          <div class="expense-m-pair">
+            <div><label>Período de pago</label><select data-expense-draft="period">${renderExpensePeriodOptions(draft.period || 'mensual')}</select></div>
+            <div><label>Tipo de gasto</label>
+              <select data-expense-draft="expenseType">
+                <option value="" ${!draft.expenseType ? 'selected' : ''}>Sin asignar</option>
+                ${expenseTypeOptions.map((t) => `<option value="${sanitize(t.value)}" ${draft.expenseType === t.value ? 'selected' : ''}>${sanitize(t.value)}</option>`).join('')}
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <div class="table-wrap table-compact">
+          <table class="expense-mobile-table">
+            <thead><tr><th>#</th><th>Monto</th><th>Fecha</th><th>Est.</th><th>Arch.</th><th>Obs.</th></tr></thead>
+            <tbody>${rows || '<tr><td colspan="6" class="empty-state">Sin filas configuradas.</td></tr>'}</tbody>
+          </table>
+        </div>
+
+        <div class="kpi-grid kpi-grid-compact-3">
+          <div class="kpi-box"><span>Total pagado</span><strong>${formatCurrency(draftSummary.totalPaid)}</strong></div>
+          <div class="kpi-box"><span>Entradas</span><strong>${draftSummary.paidCount} de ${draftSummary.totalCount}</strong></div>
+          <div class="kpi-box"><span>Promedio</span><strong>${formatCurrency(Math.round(draftSummary.average || 0))}</strong></div>
+        </div>
+
+        <div class="inline-actions action-pair expense-m-actions">
+          <button class="btn btn-primary" data-action="save-expense-card">Guardar cambios</button>
+          <button class="btn btn-soft" data-action="reset-expense-draft">Descartar cambios</button>
+        </div>
+      </div>
+    `;
+  }
+
+  function openExpenseFileMenu(entryId) {
+    const entry = (state.ui.expenseDraft?.entries || []).find((item) => item.id === entryId);
+    if (!entry) return;
+    const hasPdf = Boolean(getPrimaryAttachment(entry, legacyExpenseAttachment));
+    const item = (action, label, enabled) => `<button type="button" class="custom-dropdown-option" ${enabled ? `data-action="${action}" data-entry-id="${entryId}" data-close-picker="1"` : 'disabled'}><span class="option-name">${label}</span></button>`;
+    openPickerModal('Comprobante PDF', [
+      item('pick-expense-pdf', 'Subir PDF', !hasPdf),
+      item('view-expense-pdf', 'Ver', hasPdf),
+      item('download-expense-pdf', 'Descargar', hasPdf),
+      item('clear-expense-pdf', 'Quitar', hasPdf)
+    ].join(''));
+  }
+
+  function openExpenseNotes(entryId) {
+    const entry = (state.ui.expenseDraft?.entries || []).find((item) => item.id === entryId);
+    if (!entry) return;
+    openPickerModal('Observaciones', `
+      <textarea id="expense-notes-modal-input" class="expense-notes-input" maxlength="120" data-entry-id="${entryId}" data-expense-entry-field="notes" placeholder="Observación breve">${sanitize(entry.notes || '')}</textarea>
+      <button type="button" class="btn btn-primary" data-action="close-picker-modal">Listo</button>
+    `);
+  }
+
+  function openExpenseColorPicker() {
+    const current = state.ui.expenseDraft?.color;
+    openPickerModal('Color de la card', `<div class="expense-swatch-grid">${expenseColorOptions.map((color) => `
+      <button type="button" class="expense-swatch expense-swatch-lg ${current === color ? 'selected' : ''}" data-action="select-expense-color" data-close-picker="1" data-color="${color}" style="--swatch-color:${color}" aria-label="Color ${color}"></button>`).join('')}</div>`);
+  }
+
   function renderExpensesModule() {
     state.expenses = state.expenses || { cards: [] };
     state.expenses.cards = Array.isArray(state.expenses.cards) ? state.expenses.cards.map((card) => createExpenseCard(card)) : [];
@@ -11771,6 +12127,8 @@ Objetivo
     }).join('');
 
     const draftSummary = getExpenseSummary(draft || { entries: [] });
+
+    if (isMobileViewport()) return renderExpensesMobile(cards, draft, draftSummary);
 
     return `
       <div class="card">
@@ -12287,7 +12645,399 @@ Objetivo
     `;
   }
 
+  const PROVIDER_PRIVATE = 'Particular / privado';
+
+  function providerContactText(item) {
+    return [item.phone, item.instagram, item.facebook, item.email, item.website].map((v) => String(v || '').trim()).filter(Boolean).join(' · ');
+  }
+
+  function findRegisteredProvider(name) {
+    const clean = String(name || '').trim().toLowerCase();
+    if (!clean || clean === PROVIDER_PRIVATE.toLowerCase()) return null;
+    return (state.database.externalResources || []).find((item) => String(item.name || '').trim().toLowerCase() === clean) || null;
+  }
+
+  function getMobileMaterialForm() {
+    const editing = state.database.materials.find((item) => item.id === state.ui.editingMaterialId) || {};
+    const d = state.ui.databaseDraft || {};
+    const pick = (key, fallback) => d[key] ?? editing[key] ?? fallback;
+    return {
+      group: pick('group', ''),
+      groupSelection: d.groupSelection ?? d.group ?? (editing.group || ''),
+      newGroup: d.newGroup ?? '',
+      name: pick('name', ''),
+      calculationUnit: pick('calculationUnit', 'cm2'),
+      baseCost: pick('baseCost', 0),
+      notes: pick('notes', ''),
+      provider: pick('provider', '') || PROVIDER_PRIVATE,
+      supplierAddress: pick('supplierAddress', ''),
+      supplierContact: pick('supplierContact', ''),
+      widthCm: pick('widthCm', ''),
+      heightCm: pick('heightCm', ''),
+      yieldQuantity: pick('yieldQuantity', ''),
+      yieldUnit: pick('yieldUnit', 'm²'),
+      imageDataUrl: pick('imageDataUrl', ''),
+      imageName: pick('imageName', ''),
+      imageSizeKb: pick('imageSizeKb', 0)
+    };
+  }
+
+  function getMaterialGroupChoices() {
+    const defaultGroups = ['Placas', 'Servicio', 'Consumible', 'Accesorio', 'Pintura', 'Terminaciones'];
+    return [...new Set([...defaultGroups, ...state.database.materials.map((item) => item.group).filter(Boolean)])];
+  }
+
+  function buildFormulaBlock(form, preview) {
+    const base = Number(form.baseCost) || 0;
+    let formula = '';
+    let calc = '';
+    if (form.calculationUnit === 'cm2') {
+      const w = Number(form.widthCm) || 0;
+      const h = Number(form.heightCm) || 0;
+      formula = 'Costo por cm² = Precio ÷ (Ancho × Alto)';
+      calc = w * h > 0 ? `= ${formatCurrencySmart(base)} ÷ (${w} × ${h} cm = ${(w * h).toFixed(0)} cm²)` : 'Ingresa ancho y alto para ver el cálculo.';
+    } else if (form.calculationUnit === 'rendimiento') {
+      const y = Number(form.yieldQuantity) || 0;
+      formula = `Costo por ${form.yieldUnit || 'm²'} = Precio ÷ Rendimiento total`;
+      calc = y > 0 ? `= ${formatCurrencySmart(base)} ÷ ${y} ${form.yieldUnit || 'm²'}` : 'Ingresa el rendimiento total para ver el cálculo.';
+    } else {
+      const unit = form.calculationUnit === 'min' ? 'minuto' : 'unidad';
+      formula = `Costo por ${unit} = Precio`;
+      calc = `= ${formatCurrencySmart(base)}`;
+    }
+    return `
+      <div class="m-formula">
+        <div class="m-formula-title">Fórmula</div>
+        <div class="m-formula-line">${sanitize(formula)}</div>
+        <div class="m-formula-line m-formula-calc">${sanitize(calc)}</div>
+        <div class="m-formula-result"><span>Resultado</span><strong>${formatCurrencySmart(preview.unitCost)}</strong> <em>por ${sanitize(preview.referenceUnit)}</em></div>
+      </div>`;
+  }
+
+  // Actualiza solo el bloque de fórmula (sin re-render) para no quitar el foco mientras se escribe.
+  function refreshMobileFormula() {
+    const node = document.querySelector('.m-formula');
+    if (!node) return;
+    const form = getMobileMaterialForm();
+    node.outerHTML = buildFormulaBlock(form, calculateMaterialPreview(form));
+  }
+
+  function renderDatabaseMobile() {
+    const view = state.ui.databaseMobileView || 'menu';
+    const back = (title, extra = '') => `<div class="section-title"><div class="expense-detail-title"><button type="button" class="btn btn-soft btn-add-line-icon" data-action="db-open-view" data-view-key="${view === 'providers' && state.ui.providerReturn ? 'new' : 'menu'}" title="Volver" aria-label="Volver">‹</button><h2>${title}</h2></div>${extra}</div>`;
+
+    if (view === 'new') {
+      const form = getMobileMaterialForm();
+      const preview = calculateMaterialPreview(form);
+      const provider = findRegisteredProvider(form.provider);
+      const groups = getMaterialGroupChoices();
+      const isNewGroup = form.groupSelection === '__new__';
+      const groupLabel = isNewGroup ? 'Nuevo grupo…' : (groups.includes(form.groupSelection) ? form.groupSelection : 'Selecciona grupo');
+      const contactValue = provider ? providerContactText(provider) : form.supplierContact;
+      return `
+        <div class="card m-form">
+          ${back(state.ui.editingMaterialId ? 'Editar insumo' : 'Insumo / Servicio nuevo')}
+          <div class="database-form-layout">
+            <div class="form-section">
+              <div class="form-section-title"><span class="form-step">1</span> Identificación del ítem</div>
+              <div class="m-stack">
+                <div><label>Nombre del ítem nuevo</label><input id="material-name" data-db-draft="name" value="${sanitize(form.name)}" placeholder="Ejemplo: Acrílico negro 3 mm" /></div>
+                <div class="m-pair">
+                  <div>
+                    <label>Grupo</label>
+                    <select id="material-group-select" data-db-draft="groupSelection" hidden>
+                      <option value="${sanitize(isNewGroup ? '__new__' : form.groupSelection)}" selected></option>
+                    </select>
+                    <button type="button" class="btn btn-soft picker-trigger-btn" data-action="open-db-group-picker"><span class="picker-trigger-label">${sanitize(groupLabel)}</span><span class="picker-trigger-caret" aria-hidden="true">▾</span></button>
+                  </div>
+                  <div>
+                    <label>Proveedor</label>
+                    <input id="material-provider" type="hidden" value="${sanitize(form.provider)}" />
+                    <button type="button" class="btn btn-soft picker-trigger-btn" data-action="open-db-provider-picker"><span class="picker-trigger-label">${sanitize(form.provider)}</span><span class="picker-trigger-caret" aria-hidden="true">▾</span></button>
+                  </div>
+                </div>
+                ${isNewGroup ? `<div><label>Nombre del nuevo grupo</label><input id="material-new-group" data-db-draft="newGroup" value="${sanitize(form.newGroup || '')}" placeholder="Ejemplo: Quincallería" /></div>` : ''}
+              </div>
+            </div>
+
+            <div class="form-section">
+              <div class="form-section-title"><span class="form-step">2</span> Coste base</div>
+              <div class="m-pair">
+                <div><label>Unidad base</label><select id="material-calculation-unit" data-db-draft="calculationUnit">${renderCalculationUnitOptions(form.calculationUnit)}</select></div>
+                <div><label>Precio $</label><input id="material-base-cost" type="text" inputmode="numeric" data-format="clp" data-db-draft="baseCost" value="${formatNumber(form.baseCost || 0)}" /></div>
+              </div>
+              ${renderDatabaseCalculationFields(form)}
+              ${buildFormulaBlock(form, preview)}
+            </div>
+
+            <div class="form-section">
+              <div class="form-section-title"><span class="form-step">3</span> Contacto y compra</div>
+              <div class="m-stack">
+                <div><label>Dirección proveedor</label><input id="material-supplier-address" data-db-draft="supplierAddress" value="${sanitize(form.supplierAddress)}" placeholder="Dirección o ubicación de compra" /></div>
+                <div><label>Contacto${provider ? ' (del proveedor)' : ''}</label><input id="material-supplier-contact" data-db-draft="supplierContact" value="${sanitize(contactValue)}" placeholder="Teléfono, web, correo, Instagram..." ${provider ? 'readonly' : ''} /></div>
+              </div>
+            </div>
+
+            <div class="form-section">
+              <div class="form-section-title"><span class="form-step">4</span> Imagen opcional</div>
+              <div class="m-image-row">
+                <label class="btn btn-soft m-image-btn">Subir imagen<input id="material-image" type="file" accept="image/webp,image/jpeg,image/png" hidden /></label>
+                ${form.imageDataUrl ? `<img class="m-image-thumb" src="${sanitize(form.imageDataUrl)}" alt="Miniatura" /><button type="button" class="btn btn-soft btn-icon" data-action="remove-material-image" title="Quitar imagen" aria-label="Quitar imagen">${iconSvg('trash')}</button>` : '<span class="small">WebP/JPG/PNG · máx. 150 KB</span>'}
+              </div>
+            </div>
+
+            <div class="form-section">
+              <div class="form-section-title"><span class="form-step">5</span> Notas internas</div>
+              <textarea id="material-notes" data-db-draft="notes">${sanitize(form.notes)}</textarea>
+            </div>
+          </div>
+          <div class="inline-actions action-pair">
+            <button class="btn btn-primary" data-action="save-material">${state.ui.editingMaterialId ? 'Actualizar insumo' : 'Guardar insumo'}</button>
+            <button class="btn btn-soft btn-icon" data-action="clear-material-form" title="Limpiar ficha" aria-label="Limpiar ficha">${iconSvg('broom')}</button>
+            ${state.ui.editingMaterialId ? '<button class="btn btn-soft" data-action="cancel-edit-material">Cancelar edición</button>' : ''}
+          </div>
+        </div>`;
+    }
+
+    if (view === 'table') {
+      const groups = getMaterialGroupChoices();
+      const activeFilter = (state.ui.databaseFilter === 'Material' ? 'Placas' : state.ui.databaseFilter) || 'Todos';
+      let items = activeFilter === 'Todos' ? [...state.database.materials] : state.database.materials.filter((item) => item.group === activeFilter);
+      const newestFirst = state.ui.databaseSort !== 'date-asc';
+      items.sort((a, b) => (newestFirst ? parseCreatedAtTimestamp(b.createdAt) - parseCreatedAtTimestamp(a.createdAt) : parseCreatedAtTimestamp(a.createdAt) - parseCreatedAtTimestamp(b.createdAt)));
+      const rows = items.map((item) => `
+        <tr class="attendance-row-clickable ${item.status === 'Inactivo' ? 'row-inactive' : ''}" data-action="view-material" data-id="${item.id}">
+          <td><strong class="db-item-name">${sanitize(item.name)}</strong><div class="small">${sanitize(item.group || '')} · ${sanitize(item.provider || 'Sin proveedor')}</div></td>
+          <td class="m-num-cell"><strong>${formatCurrencySmart(item.unitCost)}</strong><div class="small">${sanitize(renderCalculationUnitLabel(item.calculationUnit))}</div></td>
+        </tr>`).join('');
+      return `
+        <div class="card">
+          ${back('Base de datos', `<span class="pill ok">${items.length}/${state.database.materials.length}</span>`)}
+          <div class="ot-order-controls">
+            <button type="button" class="btn btn-soft picker-trigger-btn" data-action="open-db-filter-picker"><span class="picker-trigger-label">Grupo: ${sanitize(activeFilter)}</span><span class="picker-trigger-caret" aria-hidden="true">▾</span></button>
+            <button type="button" class="btn btn-soft" data-action="set-database-sort" data-sort="${newestFirst ? 'date-asc' : 'date-desc'}">Orden: ${newestFirst ? 'más reciente' : 'más antiguo'}</button>
+          </div>
+          <div class="table-wrap table-compact">
+            <table class="contacts-mobile-table">
+              <thead><tr><th>Ítem</th><th>Costo aplicado</th></tr></thead>
+              <tbody>${rows || '<tr><td colspan="2" class="empty-state">Tu base de datos está vacía.</td></tr>'}</tbody>
+            </table>
+          </div>
+        </div>`;
+    }
+
+    if (view === 'productTypes') {
+      const editing = (state.database.productTypes || []).find((item) => item.id === state.ui.editingProductTypeId) || {};
+      const d = state.ui.productTypeDraft || {};
+      const form = { name: d.name ?? editing.name ?? '', comments: d.comments ?? editing.comments ?? '' };
+      const rows = [...(state.database.productTypes || [])].sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'es')).map((item) => `
+        <tr class="attendance-row-clickable" data-action="view-product-type" data-id="${item.id}"><td><strong>${sanitize(item.name)}</strong></td></tr>`).join('');
+      return `
+        <div class="card m-form">
+          ${back('Tipos de producto', `<span class="pill ok">${(state.database.productTypes || []).length}</span>`)}
+          <div class="m-stack">
+            <div><label>Nombre del tipo de producto</label><input data-product-type-draft="name" value="${sanitize(form.name)}" placeholder="Ejemplo: Letrero acrílico" /></div>
+            <div><label>Comentarios</label><input data-product-type-draft="comments" value="${sanitize(form.comments)}" placeholder="Opcional" /></div>
+          </div>
+          <div class="inline-actions action-pair">
+            <button class="btn btn-primary" data-action="save-product-type">${state.ui.editingProductTypeId ? 'Actualizar tipo' : 'Guardar tipo'}</button>
+            <button class="btn btn-soft btn-icon" data-action="clear-product-type-form" title="Limpiar ficha" aria-label="Limpiar ficha">${iconSvg('broom')}</button>
+          </div>
+        </div>
+        <div class="card">
+          <div class="section-title"><h3>Tipos guardados</h3></div>
+          <div class="table-wrap table-compact"><table class="contacts-mobile-table"><tbody>${rows || '<tr><td class="empty-state">Aún no hay tipos guardados.</td></tr>'}</tbody></table></div>
+        </div>`;
+    }
+
+    if (view === 'providers') {
+      const editing = (state.database.externalResources || []).find((item) => item.id === state.ui.editingExternalResourceId) || {};
+      const d = state.ui.externalResourceDraft || {};
+      const f = (k, fb = '') => d[k] ?? editing[k] ?? fb;
+      const rows = [...(state.database.externalResources || [])].sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'es')).map((item) => `
+        <tr class="attendance-row-clickable ${item.status === 'Inactivo' ? 'row-inactive' : ''}" data-action="view-provider" data-id="${item.id}"><td><strong>${sanitize(item.name)}</strong><div class="small">${sanitize(normalizeProviderType(item.type))}</div></td></tr>`).join('');
+      return `
+        <div class="card m-form">
+          ${back('Proveedores', `<span class="pill ok">${(state.database.externalResources || []).length}</span>`)}
+          <div class="database-grid database-grid-3 compact-grid">
+            <div><label>Tipo</label><select data-external-resource-draft="type"><option value="Proveedor" ${f('type', 'Proveedor') === 'Proveedor' ? 'selected' : ''}>Proveedor</option><option value="Particular" ${f('type') === 'Particular' ? 'selected' : ''}>Particular</option></select></div>
+            <div><label>Nombre</label><input data-external-resource-draft="name" value="${sanitize(f('name'))}" placeholder="Nombre" /></div>
+            <div class="contact-span-2"><label>Descripción</label><input data-external-resource-draft="description" value="${sanitize(f('description'))}" placeholder="Notas para reconocerlo" /></div>
+            <div><label>Teléfono</label><input data-external-resource-draft="phone" value="${sanitize(f('phone'))}" placeholder="+56 ..." /></div>
+            <div><label>Instagram</label><input data-external-resource-draft="instagram" value="${sanitize(f('instagram'))}" placeholder="@usuario" /></div>
+            <div><label>Correo</label><input data-external-resource-draft="email" value="${sanitize(f('email'))}" placeholder="correo@dominio.cl" /></div>
+            <div><label>Página web</label><input data-external-resource-draft="website" value="${sanitize(f('website'))}" placeholder="https://..." /></div>
+            <div><label>Estado</label><select data-external-resource-draft="status"><option value="Activo" ${f('status', 'Activo') === 'Activo' ? 'selected' : ''}>Activo</option><option value="Inactivo" ${f('status') === 'Inactivo' ? 'selected' : ''}>Inactivo</option></select></div>
+          </div>
+          <div class="inline-actions action-pair">
+            <button class="btn btn-primary" data-action="save-external-resource">${state.ui.editingExternalResourceId ? 'Actualizar' : 'Guardar proveedor'}</button>
+            <button class="btn btn-soft btn-icon" data-action="clear-external-resource-form" title="Limpiar ficha" aria-label="Limpiar ficha">${iconSvg('broom')}</button>
+          </div>
+        </div>
+        <div class="card">
+          <div class="section-title"><h3>Proveedores guardados</h3></div>
+          <div class="table-wrap table-compact"><table class="contacts-mobile-table"><tbody>${rows || '<tr><td class="empty-state">Aún no hay proveedores guardados.</td></tr>'}</tbody></table></div>
+        </div>`;
+    }
+
+    return `
+      <div class="card">
+        <div class="section-title"><div><h2>Base de datos</h2></div></div>
+        <div class="mobile-home-menu">
+          <button type="button" class="btn mobile-home-btn" data-action="db-open-view" data-view-key="new"><span>Insumo / Servicio nuevo</span></button>
+          <button type="button" class="btn mobile-home-btn" data-action="db-open-view" data-view-key="table"><span>Base de datos de insumos</span></button>
+          <button type="button" class="btn mobile-home-btn" data-action="db-open-view" data-view-key="productTypes"><span>Tipos de producto</span></button>
+          <button type="button" class="btn mobile-home-btn" data-action="db-open-view" data-view-key="providers"><span>Proveedores</span></button>
+        </div>
+      </div>`;
+  }
+
+  function openDbGroupPicker() {
+    const form = getMobileMaterialForm();
+    const groups = getMaterialGroupChoices();
+    const opt = (value, label, active) => `<button type="button" class="custom-dropdown-option ${active ? 'active' : ''}" data-action="pick-db-group" data-group="${sanitize(value)}" data-close-picker="1"><span class="option-name">${sanitize(label)}</span></button>`;
+    openPickerModal('Selecciona un grupo', groups.map((g) => opt(g, g, form.groupSelection === g)).join('') + opt('__new__', 'Nuevo grupo…', form.groupSelection === '__new__'));
+  }
+
+  function openDbProviderPicker() {
+    const form = getMobileMaterialForm();
+    const providers = [...(state.database.externalResources || [])].filter((item) => item.status !== 'Inactivo').sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'es'));
+    const opt = (id, label, active, meta = '') => `<button type="button" class="custom-dropdown-option ${active ? 'active' : ''}" data-action="pick-db-provider" data-provider-id="${sanitize(id)}" data-close-picker="1"><span class="option-name">${sanitize(label)}</span>${meta ? `<span class="option-meta">${sanitize(meta)}</span>` : ''}</button>`;
+    openPickerModal('Selecciona un proveedor', opt('', PROVIDER_PRIVATE, form.provider === PROVIDER_PRIVATE)
+      + providers.map((item) => opt(item.id, item.name, form.provider === item.name, normalizeProviderType(item.type))).join('')
+      + opt('__new__', '➕ Nuevo proveedor…', false));
+  }
+
+  function openDbFilterPicker() {
+    const active = (state.ui.databaseFilter === 'Material' ? 'Placas' : state.ui.databaseFilter) || 'Todos';
+    openPickerModal('Filtrar por grupo', ['Todos', ...getMaterialGroupChoices()].map((g) => `<button type="button" class="custom-dropdown-option ${active === g ? 'active' : ''}" data-action="set-database-filter" data-filter="${sanitize(g)}" data-close-picker="1"><span class="option-name">${sanitize(g)}</span></button>`).join(''));
+  }
+
+  function detailRows(pairs) {
+    return pairs.map(([label, value]) => `<div class="attendance-record-modal-row"><span>${label}</span><span>${value || '—'}</span></div>`).join('');
+  }
+
+  function openMaterialDetail(id) {
+    const item = state.database.materials.find((m) => m.id === id);
+    if (!item) return;
+    openPickerModal(item.name, `
+      ${item.imageDataUrl ? `<img class="m-image-thumb m-image-thumb-lg" src="${sanitize(item.imageDataUrl)}" alt="${sanitize(item.name)}" />` : ''}
+      ${detailRows([
+        ['Grupo', sanitize(item.group || '')],
+        ['Proveedor', sanitize(item.provider || 'Sin proveedor')],
+        ['Fecha', sanitize(item.createdAt || '')],
+        ['Costo base', formatCurrencySmart(item.baseCost)],
+        ['Resultado aplicado', `${formatCurrencySmart(item.unitCost)} ${sanitize(renderCalculationUnitLabel(item.calculationUnit))}<br><span class="small">${sanitize(item.formulaSummary || '')}</span>`],
+        ['Dirección', sanitize(item.supplierAddress || '')],
+        ['Contacto', sanitize(item.supplierContact || '')],
+        ['Notas', sanitize(item.notes || '')],
+        ['Estado', sanitize(item.status || 'Activo')]
+      ])}
+      <div class="attendance-record-modal-actions m-actions-wrap">
+        <button class="btn btn-soft" data-action="edit-material" data-id="${item.id}" data-close-picker="1">${iconSvg('edit')} Editar</button>
+        <button class="btn btn-soft" data-action="duplicate-material" data-id="${item.id}" data-close-picker="1">⧉ Duplicar</button>
+        <button class="btn btn-soft" data-action="toggle-material-status" data-id="${item.id}" data-close-picker="1">${item.status === 'Inactivo' ? 'Activar' : 'Desactivar'}</button>
+        <button class="btn btn-soft" data-action="delete-material" data-id="${item.id}" data-close-picker="1">${iconSvg('trash')} Eliminar</button>
+      </div>`);
+  }
+
+  function openProductTypeDetail(id) {
+    const item = (state.database.productTypes || []).find((m) => m.id === id);
+    if (!item) return;
+    openPickerModal(item.name, `${detailRows([['Fecha', sanitize(item.createdAt || '')], ['Comentarios', sanitize(item.comments || '')]])}
+      <div class="attendance-record-modal-actions">
+        <button class="btn btn-soft" data-action="edit-product-type" data-id="${item.id}" data-close-picker="1">${iconSvg('edit')} Editar</button>
+        <button class="btn btn-soft" data-action="delete-product-type" data-id="${item.id}" data-close-picker="1">${iconSvg('trash')} Eliminar</button>
+      </div>`);
+  }
+
+  function openProviderDetail(id) {
+    const item = (state.database.externalResources || []).find((m) => m.id === id);
+    if (!item) return;
+    openPickerModal(item.name, `${detailRows([
+      ['Tipo', sanitize(normalizeProviderType(item.type))],
+      ['Descripción', sanitize(item.description || '')],
+      ['Contacto', sanitize(providerContactText(item))],
+      ['Estado', sanitize(item.status || 'Activo')]
+    ])}
+      <div class="attendance-record-modal-actions">
+        <button class="btn btn-soft" data-action="edit-external-resource" data-id="${item.id}" data-close-picker="1">${iconSvg('edit')} Editar</button>
+        <button class="btn btn-soft" data-action="delete-external-resource" data-id="${item.id}" data-close-picker="1">${iconSvg('trash')} Eliminar</button>
+      </div>`);
+  }
+
+  // Escenario (móvil): ficha editable de CIF, integrante del equipo u objetivo.
+  let scenarioItemModal = null;
+
+  function scenarioItemComputedHtml(kind, item) {
+    const months = Number(state.scenario.periodMonths) || 1;
+    if (kind === 'fixedCost') {
+      const factor = window.ERMCalc.periodicityFactor(item.periodicity, state.scenario.periodMonths);
+      return detailRows([['Factor', factor.toFixed(2)], ['Total en período', `<strong>${formatCurrency(item.amount * factor)}</strong>`]]);
+    }
+    const monthly = Number(item.hourlyRate || 0) * Number(item.hoursPerMonth || 0);
+    return detailRows([['Sueldo mensual', `<strong>${formatCurrency(monthly)}</strong>`], [`Sueldo del período (${months} m)`, formatCurrency(monthly * months)]]);
+  }
+
+  function openScenarioItemModal(kind, id) {
+    const locked = Boolean(state.ui.scenarioLocked);
+    const dis = locked ? 'disabled' : '';
+    if (kind === 'goal') {
+      const item = (state.scenario.personalGoals || []).find((goal) => goal.id === id);
+      if (!item) return;
+      scenarioItemModal = null;
+      openPickerModal(item.title || 'Objetivo', `
+        ${detailRows([
+          ['Descripción', sanitize(item.description || '')],
+          ['Creación', sanitize(formatGoalDate(item.createdAt))],
+          ['Cierre automático', sanitize(formatGoalDate(item.autoCloseAt))],
+          ['Logrado en transcurso', sanitize(item.achievedDuringAt ? formatGoalDate(item.achievedDuringAt) : '-')]
+        ])}
+        <div class="scn-modal-field"><label>Estado</label><select class="goal-status-select" data-scenario-goal-status="${item.id}" ${dis}>${renderGoalStatusOptions(item.status)}</select></div>
+        <div class="attendance-record-modal-actions">
+          <button class="btn btn-soft" data-action="edit-scenario-goal" data-id="${item.id}" data-close-picker="1" ${dis}>${iconSvg('edit')} Editar</button>
+          <button class="btn btn-soft" data-action="delete-scenario-goal" data-id="${item.id}" data-close-picker="1" ${dis}>${iconSvg('trash')} Eliminar</button>
+        </div>`);
+      return;
+    }
+
+    const isCost = kind === 'fixedCost';
+    const collection = isCost ? 'scenario.fixedCosts' : 'scenario.employees';
+    const item = (isCost ? state.scenario.fixedCosts : state.scenario.employees).find((row) => row.id === id);
+    if (!item) return;
+    scenarioItemModal = { kind, id };
+    const attrs = (key) => `data-collection="${collection}" data-id="${item.id}" data-key="${key}" ${dis}`;
+    const fields = isCost ? `
+      <div class="scn-modal-field"><label>Concepto</label><input ${attrs('name')} value="${sanitize(item.name)}" /></div>
+      <div class="m-pair">
+        <div><label>Periodicidad</label><select ${attrs('periodicity')}>${renderPeriodicityOptions(item.periodicity)}</select></div>
+        <div><label>Monto</label><input type="text" inputmode="numeric" data-format="clp" ${attrs('amount')} value="${formatNumber(item.amount || 0)}" /></div>
+      </div>` : `
+      <div class="scn-modal-field"><label>Nombre</label><input ${attrs('name')} value="${sanitize(item.name)}" /></div>
+      <div class="m-pair">
+        <div><label>Valor hora</label><input type="text" inputmode="numeric" data-format="clp" ${attrs('hourlyRate')} value="${formatNumber(item.hourlyRate || 0)}" /></div>
+        <div><label>Horas al mes</label><input type="number" min="0" step="0.5" ${attrs('hoursPerMonth')} value="${item.hoursPerMonth}" /></div>
+      </div>`;
+    openPickerModal(isCost ? 'Costo CIF' : 'Integrante del equipo', `
+      <div class="scn-modal-form">${fields}</div>
+      <div id="scn-modal-computed">${scenarioItemComputedHtml(kind, item)}</div>
+      ${locked ? '<p class="help">El escenario está bloqueado. Desbloquéalo para editar.</p>' : ''}
+      <div class="attendance-record-modal-actions">
+        <button class="btn btn-primary" data-action="close-picker-modal">Listo</button>
+        <button class="btn btn-soft" data-action="${isCost ? 'remove-fixed-cost' : 'remove-employee'}" data-id="${item.id}" data-close-picker="1" ${dis}>${iconSvg('trash')} Eliminar</button>
+      </div>`);
+  }
+
+  function refreshScenarioItemModal() {
+    const target = document.getElementById('scn-modal-computed');
+    if (!scenarioItemModal || !target || refs.pickerModal?.classList.contains('is-hidden')) return;
+    const { kind, id } = scenarioItemModal;
+    const item = (kind === 'fixedCost' ? state.scenario.fixedCosts : state.scenario.employees).find((row) => row.id === id);
+    if (item) target.innerHTML = scenarioItemComputedHtml(kind, item);
+  }
+
   function renderDatabase() {
+    if (isMobileViewport()) return renderDatabaseMobile();
     if (state.ui.databaseSection === 'productTypes') return renderProductTypesSection();
     if (state.ui.databaseSection === 'externalResources') return renderExternalResourcesSection();
 
@@ -12617,13 +13367,19 @@ Objetivo
     return `<span class="info-tip" tabindex="0" data-tooltip="${sanitize(text)}" title="${sanitize(text)}">${iconSvg('info', 'info-tip-icon')}</span>`;
   }
 
+  const PERIODICITY_OPTIONS = [
+    ['mensual', 'Mensual'],
+    ['trimestral', 'Trimestral'],
+    ['anual', 'Anual'],
+    ['unico', 'Único']
+  ];
+
   function renderPeriodicityOptions(current) {
-    return [
-      ['mensual', 'Mensual'],
-      ['trimestral', 'Trimestral'],
-      ['anual', 'Anual'],
-      ['unico', 'Único']
-    ].map(([value, label]) => `<option value="${value}" ${current === value ? 'selected' : ''}>${label}</option>`).join('');
+    return PERIODICITY_OPTIONS.map(([value, label]) => `<option value="${value}" ${current === value ? 'selected' : ''}>${label}</option>`).join('');
+  }
+
+  function periodicityLabel(value) {
+    return (PERIODICITY_OPTIONS.find(([key]) => key === value) || [value, value || '-'])[1];
   }
 
   // app.js puede cargarse después de DOMContentLoaded (tras el login de sync.js).
