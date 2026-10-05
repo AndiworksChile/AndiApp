@@ -372,6 +372,9 @@ window.ERMCalc = (() => {
 
     const materialsTotal = roundMoney(materialLines.reduce((acc, line) => acc + line.orderTotal, 0));
     const laborTotal = roundMoney(laborLines.reduce((acc, line) => acc + line.orderTotal, 0));
+    // Sueldo propio (equipo interno) separado de lo que se paga a recursos externos.
+    const ownLaborTotal = roundMoney(laborLines.filter((line) => !line.externalResource).reduce((acc, line) => acc + line.orderTotal, 0));
+    const externalLaborTotal = roundMoney(laborTotal - ownLaborTotal);
     const totalLaborHours = roundMoney(laborLines.reduce((acc, line) => acc + line.orderHours, 0));
     const cifHours = roundMoney(laborLines.filter((line) => !line.externalResource).reduce((acc, line) => acc + line.orderHours, 0));
     const cifCashTotal = roundMoney(cifHours * cifBreakdown.cash);
@@ -435,6 +438,8 @@ window.ERMCalc = (() => {
         materialsTotal,
         laborTotal,
         totalLaborHours,
+        ownLaborTotal,
+        externalLaborTotal,
         cifHours,
         cifPerHourApplied,
         cifCashPerHour: cifBreakdown.cash,

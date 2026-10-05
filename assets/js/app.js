@@ -3913,6 +3913,19 @@ Objetivo
         render();
       }
 
+      if (action === 'set-rent-percent') {
+        const max = window.ERMCalc.opportunityMonthlyMax(state.scenario);
+        const percent = Math.max(0, Math.min(100, Number(actionBtn.dataset.percent) || 0));
+        state.quote.rentApplied = Math.round(max * percent / 100);
+        render();
+        return;
+      }
+
+      if (action === 'open-qty-price-table') {
+        openPickerModal('Tabla de precio x cantidad', renderQuantityPriceTable());
+        return;
+      }
+
       if (action === 'select-price-target') {
         const mode = actionBtn.dataset.priceMode || 'minimum';
         state.quote.selectedPriceMode = mode;
@@ -5414,7 +5427,7 @@ Objetivo
           }
         }
 
-        if (target.dataset.model === 'quote.rentApplied' || target.dataset.model === 'quote.learningRate') {
+        if (target.dataset.model === 'quote.learningRate') {
           setByPath(state, target.dataset.model, Number(target.value) || 0);
         }
 
@@ -5427,7 +5440,6 @@ Objetivo
           || target.dataset.model === 'quote.logistics.mode'
           || target.dataset.model === 'quote.status'
           || target.dataset.model === 'quote.pieceQuantity'
-          || target.dataset.model === 'quote.rentApplied'
           || target.dataset.model === 'quote.learningRate';
         const isScenarioModel = String(target.dataset.model || '').startsWith('scenario.');
         if (mustRerenderMain || (isScenarioModel && state.currentView === 'scenario')) {
@@ -5519,9 +5531,8 @@ Objetivo
       if (event.target?.id === 'notes-general-input') {
         handleNotesEditorInput();
       }
-      if (event.target?.id === 'quote-rent-slider') {
-        const label = document.getElementById('quote-rent-label');
-        if (label) label.textContent = formatCurrency(Number(event.target.value) || 0);
+      if (event.target?.id === 'qty-price-custom-input') {
+        refreshQuantityPriceCustomRow(event.target);
       }
       if (event.target?.id === 'material-base-cost' || event.target?.id === 'material-base-cost-gross') {
         syncMaterialIvaFields(event.target);
@@ -8652,49 +8663,194 @@ Objetivo
 
     const summary = calc.quoteSummary;
     const selectedMeta = getPriceModeMeta(summary.selectedPriceMode);
-    const selectedState = summary.selectedStatus || { text: 'Dentro de las metas definidas', tone: 'info', description: '' };
     const marginAchievement = getMarginAchievement(summary);
     const ivaAmount = Math.max(0, (Number(summary.effectiveGross) || 0) - (Number(summary.effectiveNet) || 0));
     const ivaLabelPercent = Math.round((Number(state.scenario?.ivaRate) || 0.19) * 100);
+    const price = Number(summary.effectiveNet) || 0;
+    const shareOf = (amount) => (price > 0 ? (Number(amount) || 0) / price : 0);
+    const checks = buildQuoteChecks(summary);
+    const overall = checks.some((item) => item.tone === 'bad')
+      ? { text: 'No cumple', tone: 'warn' }
+      : (checks.some((item) => item.tone === 'caution') ? { text: 'A revisar', tone: 'caution' } : { text: 'Cumple todo', tone: 'ok' });
+    const qty = summary.pieceQuantity || 1;
+    const hasRent = (summary.rentMonthlyMax || 0) > 0;
+    const rentPercent = hasRent ? Math.round(((summary.rentApplied || 0) / summary.rentMonthlyMax) * 100) : 0;
+    const indicatorTone = (key) => (checks.find((item) => item.key === key) || {}).tone || 'ok';
+    const groups = [
+      ['bad', 'No cumple'],
+      ['caution', 'A tener en cuenta'],
+      ['ok', 'Positivo']
+    ].map(([tone, title]) => {
+      const items = checks.filter((item) => item.tone === tone);
+      if (!items.length) return '';
+      return `
+        <div class="summary-notes-group summary-tone-${tone}">
+          <div class="summary-notes-title">${title}</div>
+          <ul>${items.map((item) => `<li>${sanitize(item.text)}</li>`).join('')}</ul>
+        </div>`;
+    }).join('');
 
     refs.summaryPanel.innerHTML = `
       <div class="card summary-main-card ${selectedMeta.className} ${marginAchievement.tone === 'gold' ? 'summary-sheen' : ''}">
         <div class="section-title">
           <h3>Resumen en vivo</h3>
-          <span class="pill ${selectedState.tone}">${selectedState.text}</span>
+          <span class="pill ${overall.tone}">${overall.text}</span>
         </div>
 
+        <div class="summary-block-title">Costos${qty > 1 ? ` · ${qty} unidades` : ''}</div>
         <div class="summary-row"><span>Materia prima</span><strong>${formatCurrency(summary.materialsTotal)}</strong></div>
         <div class="summary-row"><span>Mano de obra</span><strong>${formatCurrency(summary.laborTotal)}</strong></div>
         <div class="summary-row"><span>CIF operativos</span><strong>${formatCurrency(summary.cifCashTotal)}</strong></div>
-        ${(summary.rentMonthlyMax || 0) > 0 ? `<div class="summary-row"><span>Arriendo (oportunidad)</span><strong>${formatCurrency(summary.cifRentTotal)}</strong></div>` : ''}
-        <div class="summary-row"><span>Subtotal producción</span><strong>${formatCurrency(summary.productionCost)}</strong></div>
-        ${(summary.pieceQuantity || 1) > 1 ? `
-        <div class="summary-row"><span>Unidades</span><strong>× ${summary.pieceQuantity}</strong></div>
-        <div class="summary-row"><span>Costo promedio por unidad</span><strong>${formatCurrency(summary.unitCost)}</strong></div>` : ''}
-        <div class="summary-row"><span>Logística</span><strong>${formatCurrency(summary.logisticsTotal)}</strong></div>
-        <div class="summary-row summary-row-total"><span>Costo total real</span><strong>${formatCurrency(summary.totalCost)}</strong></div>
+        ${hasRent ? `<div class="summary-row"><span>Arriendo (${rentPercent}%)</span><strong>${formatCurrency(summary.cifRentTotal)}</strong></div>` : ''}
+        ${(summary.logisticsTotal || 0) > 0 ? `<div class="summary-row"><span>Logística</span><strong>${formatCurrency(summary.logisticsTotal)}</strong></div>` : ''}
+        <div class="summary-row summary-row-total"><span>Costo total</span><strong>${formatCurrency(summary.totalCost)}</strong></div>
 
-        <div class="hr"></div>
-
-        ${(summary.cifRentTotal || 0) > 0 ? `<div class="summary-row"><span>Piso real (sin arriendo)</span><strong>${formatCurrency(summary.cashFloorNet)}</strong></div>` : ''}
-        <div class="summary-row"><span>Precio equilibrio</span><strong>${formatCurrency(summary.breakEvenNet)}</strong></div>
-        <div class="summary-row"><span>Precio mínimo</span><strong>${formatCurrency(summary.minimumNet)}</strong></div>
-        <div class="summary-row"><span>Precio ideal</span><strong>${formatCurrency(summary.idealNet)}</strong></div>
-
-        <div class="hr"></div>
-
-        <div class="summary-row summary-row-selected ${selectedMeta.className}"><span>Precio seleccionado</span><strong>${formatCurrency(summary.effectiveNet)}</strong></div>
-        <div class="summary-row"><span><strong>Con IVA</strong></span><strong>${formatCurrency(summary.effectiveGross)}</strong></div>
+        <div class="summary-block-title">${sanitize(selectedMeta.label)}</div>
+        <div class="summary-row summary-row-selected ${selectedMeta.className}"><span>Precio neto</span><strong>${formatCurrency(summary.effectiveNet)}</strong></div>
         <div class="summary-row"><span>IVA ${ivaLabelPercent}%</span><strong>${formatCurrency(ivaAmount)}</strong></div>
-        <div class="summary-row"><span>Margen real <span class="margin-star ${marginAchievement.tone}" title="${sanitize(marginAchievement.label)}">${marginAchievement.iconMarkup}</span></span><strong>${formatPercent(summary.realMargin)}</strong></div>
-        <div class="summary-row"><span>Utilidad en CLP</span><strong>${formatCurrency(summary.contribution)}</strong></div>
-        <p class="help"><span class="summary-selected-tag ${selectedMeta.className}">${selectedMeta.label}</span></p>
-        <p class="help">${sanitize(summary.selectedStatus?.description || 'Se mantiene dentro del rango proyectado por el escenario.')}</p>
-        <p class="help summary-average-note">Respecto al promedio por orden: ${sanitize(summary.averageSaleSignal?.text || '')}${summary.averageSaleSignal?.value ? ` (OT promedio: ${formatCurrency(summary.averageSaleSignal.value)})` : ''}.</p>
+        <div class="summary-row"><span><strong>Total con IVA</strong></span><strong>${formatCurrency(summary.effectiveGross)}</strong></div>
+        ${qty > 1 ? `<div class="summary-row"><span>Por unidad con IVA</span><strong>${formatCurrency((summary.effectiveGross || 0) / qty)}</strong></div>` : ''}
+
+        <div class="summary-block-title">¿Cómo se reparte el precio neto?</div>
+        <div class="summary-indicator summary-tone-${indicatorTone('margin')}">
+          <span>Utilidad <span class="margin-star ${marginAchievement.tone}" title="${sanitize(marginAchievement.label)}">${marginAchievement.iconMarkup}</span></span>
+          <strong>${formatCurrency(summary.contribution)}</strong>
+          <em>${formatPercent(summary.realMargin)}</em>
+        </div>
+        ${hasRent ? `
+        <div class="summary-indicator summary-tone-${indicatorTone('rent')}">
+          <span>Arriendo</span>
+          <strong>${formatCurrency(summary.cifRentTotal)}</strong>
+          <em>${formatPercent(shareOf(summary.cifRentTotal))}</em>
+        </div>` : ''}
+        <div class="summary-indicator summary-tone-${indicatorTone('salary')}">
+          <span>Sueldo</span>
+          <strong>${formatCurrency(summary.ownLaborTotal)}</strong>
+          <em>${formatPercent(shareOf(summary.ownLaborTotal))}</em>
+        </div>
+        <p class="help">Meta de utilidad: mínimo ${formatPercent(state.scenario.minimumMargin)} · ideal ${formatPercent(state.scenario.idealMargin)}.</p>
+
+        <div class="summary-block-title">Comentarios</div>
+        <div class="summary-notes">${groups}</div>
       </div>
     `;
   }
+
+  // Evalúa la OT en tres frentes (utilidad, arriendo y sueldo) y devuelve comentarios
+  // clasificados: 'bad' (no cumple), 'caution' (a tener en cuenta) u 'ok' (positivo).
+  function buildQuoteChecks(summary) {
+    const checks = [];
+    const price = Number(summary.effectiveNet) || 0;
+    const minMargin = Number(state.scenario.minimumMargin) || 0;
+    const idealMargin = Number(state.scenario.idealMargin) || 0;
+    const margin = Number(summary.realMargin) || 0;
+    const cashFloor = Number(summary.cashFloorNet) || 0;
+    const rentTotal = Number(summary.cifRentTotal) || 0;
+    const ownHours = Number(summary.cifHours) || 0;
+    const ownLabor = Number(summary.ownLaborTotal) || 0;
+
+    if (price < cashFloor) {
+      checks.push({ key: 'margin', tone: 'bad', text: `Pierdes plata real: el precio no alcanza a cubrir materiales, sueldo y gastos operativos. Faltan ${formatCurrency(cashFloor - price)} netos.` });
+    } else if ((Number(summary.contribution) || 0) < 0) {
+      checks.push({ key: 'margin', tone: 'caution', text: `Cubres los costos reales, pero no todo el arriendo cargado: dejas de ganar ${formatCurrency(-summary.contribution)} de costo de oportunidad.` });
+    } else if (margin < minMargin) {
+      checks.push({ key: 'margin', tone: 'bad', text: `Utilidad de ${formatPercent(margin)}: bajo el mínimo de ${formatPercent(minMargin)}. El precio mínimo es ${formatCurrency(summary.minimumNet)} neto.` });
+    } else if (margin < idealMargin) {
+      checks.push({ key: 'margin', tone: 'caution', text: `Utilidad de ${formatPercent(margin)}: cumple el mínimo, pero está bajo el ideal de ${formatPercent(idealMargin)} (${formatCurrency(summary.idealNet)} neto).` });
+    } else {
+      checks.push({ key: 'margin', tone: 'ok', text: `Utilidad de ${formatPercent(margin)}: cumple el ideal de ${formatPercent(idealMargin)}.` });
+    }
+
+    if ((Number(summary.rentMonthlyMax) || 0) > 0 && ownHours > 0) {
+      const percent = Math.round(((Number(summary.rentApplied) || 0) / summary.rentMonthlyMax) * 100);
+      if (percent <= 0) {
+        checks.push({ key: 'rent', tone: 'caution', text: 'No cargas arriendo: el precio es más competitivo, pero no cobra el uso del taller. Úsalo para ganar un cliente o un volumen, no siempre.' });
+      } else if (percent < 100) {
+        checks.push({ key: 'rent', tone: 'caution', text: `Cargas el ${percent}% del arriendo (${formatCurrency(rentTotal)} en esta OT). Bajo el 100% compites mejor, pero el taller no se cobra completo.` });
+      } else {
+        checks.push({ key: 'rent', tone: 'ok', text: `El precio cubre el 100% del arriendo (${formatCurrency(rentTotal)} en esta OT).` });
+      }
+    }
+
+    if (ownHours > 0) {
+      if (price < cashFloor) {
+        checks.push({ key: 'salary', tone: 'bad', text: `Tu sueldo de ${formatCurrency(ownLabor)} no queda cubierto completo con este precio.` });
+      } else {
+        // Lo que queda para ti: sueldo + arriendo + utilidad (precio menos el piso real).
+        const incomePerHour = (ownLabor + (price - cashFloor)) / ownHours;
+        checks.push({ key: 'salary', tone: 'ok', text: `Sueldo cubierto (${formatCurrency(ownLabor)}). Contando utilidad y arriendo, ganas ≈ ${formatCurrency(incomePerHour)} por hora efectiva.` });
+      }
+    }
+
+    return checks;
+  }
+
+  function renderRentBlock(summary) {
+    const max = Number(summary.rentMonthlyMax) || 0;
+    if (max <= 0) return '';
+    const applied = Number(summary.rentApplied) || 0;
+    const percent = Math.round((applied / max) * 100);
+    const options = [0, 25, 50, 75, 100].map((value) => `
+      <button type="button" class="btn filter-chip ${percent === value ? 'active' : ''}" data-action="set-rent-percent" data-percent="${value}">${value}%</button>
+    `).join('');
+    return `
+      <div class="rent-block">
+        <div class="rent-block-head">
+          <span class="label-with-tip"><strong>Arriendo en esta OT</strong>${renderInfoTip('El arriendo de un local propio no sale de tu bolsillo (costo de oportunidad). Bájalo para competir en precio y súbelo cuando el cliente no compara. Con 0%, el precio de equilibrio es tu piso real: bajo eso pierdes plata.')}</span>
+          <span class="rent-block-value">${percent}% · ${formatCurrency(applied)} de ${formatCurrency(max)} / mes</span>
+        </div>
+        <div class="rent-options">${options}</div>
+        <div class="small">Esta OT carga ${formatCurrency(summary.cifRentTotal || 0)} de arriendo (${Number(summary.cifHours || 0).toLocaleString('es-CL', { maximumFractionDigits: 2 })} h × ${formatCurrency(summary.cifRentPerHour || 0)}/h).</div>
+      </div>`;
+  }
+
+  // Precio sugerido para N unidades, recalculando la OT completa con esa cantidad
+  // (respeta líneas por pedido, curva de aprendizaje, arriendo y logística).
+  function quantityPriceCells(quantity) {
+    const qty = Math.max(1, Math.round(Number(quantity) || 1));
+    const ivaMultiplier = 1 + Math.max(0, Number(state.scenario?.ivaRate) || 0);
+    const result = window.ERMCalc.calculateQuote({ ...state, quote: { ...state.quote, pieceQuantity: qty } }).quoteSummary;
+    return `
+      <td class="qty-col-cost">${formatCurrency(result.totalCost / qty)}</td>
+      <td>${formatCurrency(result.minimumNet / qty)}</td>
+      <td>${formatCurrency(result.idealNet / qty)}</td>
+      <td><strong>${formatCurrency(result.idealNet * ivaMultiplier)}</strong></td>`;
+  }
+
+  function renderQuantityPriceTable() {
+    const quantities = [1, 2, 3, 5, 8, 10, 20, 30, 50, 100];
+    const currentQty = Math.max(1, Math.round(Number(state.quote.pieceQuantity) || 1));
+    const learning = Number(state.quote.learningRate) || 1;
+    return `
+      <div class="qty-price-wrap">
+        <p class="help">Valores netos por unidad; la última columna es el total del pedido con IVA. Curva de aprendizaje: ${formatPercent(learning)}. Incluye líneas por pedido, arriendo y logística.</p>
+        <div class="table-wrap table-compact">
+          <table class="qty-price-table">
+            <thead>
+              <tr><th>Cant.</th><th class="qty-col-cost">Costo c/u</th><th>Mín. c/u</th><th>Ideal c/u</th><th>Total ideal c/IVA</th></tr>
+            </thead>
+            <tbody>
+              ${quantities.map((qty) => `<tr class="${qty === currentQty ? 'qty-row-current' : ''}"><td><strong>${qty}</strong></td>${quantityPriceCells(qty)}</tr>`).join('')}
+            </tbody>
+            <tfoot>
+              <tr id="qty-price-custom-row" class="qty-row-custom">
+                <td><input id="qty-price-custom-input" type="number" min="1" step="1" inputmode="numeric" value="${currentQty}" aria-label="Otra cantidad" title="Escribe otra cantidad" /></td>${quantityPriceCells(currentQty)}
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+        <p class="help">Escribe cualquier cantidad en la última fila y el precio se calcula al instante.</p>
+      </div>`;
+  }
+
+  function refreshQuantityPriceCustomRow(input) {
+    const row = document.getElementById('qty-price-custom-row');
+    const qty = Math.round(Number(input.value) || 0);
+    if (!row || qty < 1) return;
+    while (row.cells.length > 1) row.deleteCell(1);
+    row.insertAdjacentHTML('beforeend', quantityPriceCells(Math.min(qty, 100000)));
+  }
+
 
   function renderScenario(calc) {
     const { scenario } = state;
@@ -9619,6 +9775,9 @@ Objetivo
           <div class="kpi-box"><span>Unidades</span><strong>${pieceQuantity}</strong>${hasMultipleUnits && calc.quoteSummary.learningFactor < 1 ? `<span class="small">Horas por pieza × ${formatPercent(calc.quoteSummary.learningFactor)}</span>` : ''}</div>
           <div class="kpi-box"><span>Subtotal producción</span><strong>${formatCurrency(calc.quoteSummary.productionCost || 0)}</strong></div>
         </div>
+        ${isMobileViewport()
+          ? '<button type="button" class="btn btn-soft qty-price-open-btn" data-action="open-qty-price-table">Tabla de precio x cantidad</button>'
+          : (hasMultipleUnits ? renderQuantityPriceTable() : '')}
       </div>
 
       <div class="card">
@@ -9627,11 +9786,7 @@ Objetivo
             <h3>CIF aplicado a la orden</h3>
           </div>
         </div>
-        ${(calc.quoteSummary.rentMonthlyMax || 0) > 0 ? `
-        <div>
-          <label class="label-with-tip"><span>Arriendo cargado (costo de oportunidad): <strong id="quote-rent-label">${formatCurrency(calc.quoteSummary.rentApplied)}</strong> de ${formatCurrency(calc.quoteSummary.rentMonthlyMax)} / mes</span>${renderInfoTip('El arriendo de un local propio no sale de tu bolsillo. Bájalo para competir en precio y súbelo cuando el cliente no compara. Al mínimo, el precio de equilibrio es tu piso real: bajo eso pierdes plata.')}</label>
-          <input id="quote-rent-slider" type="range" min="0" max="${calc.quoteSummary.rentMonthlyMax}" step="10000" data-model="quote.rentApplied" value="${calc.quoteSummary.rentApplied}" />
-        </div>` : ''}
+        ${renderRentBlock(calc.quoteSummary)}
         <div class="kpi-grid kpi-grid-compact-3">
           <div class="kpi-box"><span>Horas que cargan CIF</span><strong>${Number(calc.quoteSummary.cifHours || 0).toLocaleString('es-CL', { maximumFractionDigits: 2 })} h</strong>${calc.quoteSummary.cifHours < calc.quoteSummary.totalLaborHours ? '<span class="small">Sin horas externas</span>' : ''}</div>
           <div class="kpi-box"><span>Tasa CIF/h aplicada</span><strong>${formatCurrency(calc.quoteSummary.cifPerHourApplied || 0)}</strong><span class="small">Operativos ${formatCurrency(calc.quoteSummary.cifCashPerHour || 0)} + arriendo ${formatCurrency(calc.quoteSummary.cifRentPerHour || 0)}</span></div>
