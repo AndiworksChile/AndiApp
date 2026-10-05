@@ -307,10 +307,12 @@ window.ERMCalc = (() => {
       const material = getMaterial(state, line.materialId);
       const quantity = asNumber(line.quantity);
       const unitCost = asNumber(material?.unitCost);
-      const wastePercent = Math.max(0, asNumber(line.wastePercent)) / 100;
+      // La merma se ingresa en % (10 = 10%); wasteRate es la fracción para calcular.
+      const wastePercent = Math.max(0, asNumber(line.wastePercent));
+      const wasteRate = wastePercent / 100;
       const baseLineTotal = roundMoney(quantity * unitCost);
-      const wasteAmount = roundMoney(baseLineTotal * wastePercent);
-      const effectiveQuantity = asNumber((quantity * (1 + wastePercent)).toFixed(4));
+      const wasteAmount = roundMoney(baseLineTotal * wasteRate);
+      const effectiveQuantity = asNumber((quantity * (1 + wasteRate)).toFixed(4));
       const lineTotal = roundMoney(baseLineTotal + wasteAmount);
       const scope = isPerOrder(line) ? 'order' : 'unit';
       return {
@@ -320,6 +322,7 @@ window.ERMCalc = (() => {
         quantity,
         unitCost,
         wastePercent,
+        wasteRate,
         effectiveQuantity,
         baseLineTotal,
         wasteAmount,
@@ -328,7 +331,10 @@ window.ERMCalc = (() => {
       };
     });
 
-    const safeEfficiency = Math.max(0.1, Math.min(1, asNumber(scenario.efficiency) || 0.85));
+    // La OT puede definir su propia eficiencia (ej. trabajo casi solo de máquina ≈ 100%);
+    // si no la define, se usa la del escenario.
+    const hasQuoteEfficiency = asNumber(quote.efficiency) > 0;
+    const safeEfficiency = Math.max(0.1, Math.min(1, hasQuoteEfficiency ? asNumber(quote.efficiency) : (asNumber(scenario.efficiency) || 0.85)));
 
     const laborLines = (quote.labor || []).map((line) => {
       const employee = getEmployee(state, line.employeeId);
@@ -440,6 +446,8 @@ window.ERMCalc = (() => {
         totalLaborHours,
         ownLaborTotal,
         externalLaborTotal,
+        laborEfficiency: safeEfficiency,
+        laborEfficiencyFromQuote: hasQuoteEfficiency,
         cifHours,
         cifPerHourApplied,
         cifCashPerHour: cifBreakdown.cash,

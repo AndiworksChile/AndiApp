@@ -163,6 +163,7 @@ window.ERMDefaults = (() => {
       customPriceGross: 0,
       pieceQuantity: 1,
       rentApplied: null,
+      efficiency: null,
       learningRate: 1,
       materials: [],
       labor: [

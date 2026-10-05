@@ -1997,3 +1997,14 @@ body.footer-in-view .sync-badge {
   .layout { display: block; }
   .card, .print-sheet { box-shadow: none; border: 1px solid #cccccc; padding: 0; }
 }
+
+/* Campos con sufijo (%, h, min) */
+.input-suffix-wrap { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; }
+.input-suffix-wrap input { min-width: 0; }
+.input-suffix { font-size: 11px; color: var(--muted); white-space: nowrap; }
+.labor-time-split { display: flex; gap: 6px; align-items: center; }
+.labor-time-split input { width: 52px; }
+.quote-efficiency-row { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px 16px; margin-top: 10px; }
+.quote-efficiency-row input { width: 80px; }
+.btn.btn-inline-link { padding: 2px 8px; min-height: 0; font-size: 11px; margin-left: 4px; }
+.input-suffix-wrap .waste-input-sm { width: 56px; }

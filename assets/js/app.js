@@ -3913,6 +3913,17 @@ Objetivo
         render();
       }
 
+      if (action === 'reset-quote-efficiency') {
+        state.quote.efficiency = null;
+        render();
+        return;
+      }
+
+      if (action === 'duplicate-order-system') {
+        duplicateOrder(actionBtn.dataset.id);
+        return;
+      }
+
       if (action === 'set-rent-percent') {
         const max = window.ERMCalc.opportunityMonthlyMax(state.scenario);
         const percent = Math.max(0, Math.min(100, Number(actionBtn.dataset.percent) || 0));
@@ -5086,6 +5097,7 @@ Objetivo
         || target.dataset.expenseDraft
         || target.dataset.expenseEntryField
         || target.dataset.dbDraft
+        || target.dataset.laborTime
         || target.dataset.contactDraft
         || target.dataset.productTypeDraft
         || target.dataset.externalResourceDraft
@@ -5440,7 +5452,8 @@ Objetivo
           || target.dataset.model === 'quote.logistics.mode'
           || target.dataset.model === 'quote.status'
           || target.dataset.model === 'quote.pieceQuantity'
-          || target.dataset.model === 'quote.learningRate';
+          || target.dataset.model === 'quote.learningRate'
+          || target.dataset.model === 'quote.efficiency';
         const isScenarioModel = String(target.dataset.model || '').startsWith('scenario.');
         if (mustRerenderMain || (isScenarioModel && state.currentView === 'scenario')) {
           render();
@@ -5452,6 +5465,18 @@ Objetivo
           const calc = window.ERMCalc.calculateQuote(state);
           renderSummary(calc);
         }
+        return;
+      }
+
+      if (target.dataset.laborTime) {
+        const lineId = target.dataset.id;
+        const line = (state.quote.labor || []).find((item) => item.id === lineId);
+        if (line) {
+          const read = (part) => Math.max(0, Number(document.querySelector(`[data-labor-time="${part}"][data-id="${lineId}"]`)?.value) || 0);
+          const totalMinutes = Math.round(read('h') * 60 + read('m'));
+          line.hours = Number((totalMinutes / 60).toFixed(4));
+        }
+        render();
         return;
       }
 
@@ -6768,6 +6793,44 @@ Objetivo
     await importOrdersFromFiles([file]);
   }
 
+  // Crea una OT nueva a partir de otra: mismo contenido y cálculo, nuevo nombre y número,
+  // estado reiniciado y sin adjuntos (boletas/facturas son de la OT original).
+  function duplicateOrder(orderId) {
+    const source = findOrderById(orderId);
+    if (!source) return;
+    let name;
+    try {
+      name = window.prompt('Nombre de la nueva OT:', `${source.orderTitle || 'OT'} (copia)`);
+    } catch (error) {
+      name = `${source.orderTitle || 'OT'} (copia)`;
+    }
+    if (name === null) return;
+    const orderTitle = String(name).trim() || `${source.orderTitle || 'OT'} (copia)`;
+    const orderNumber = getNextOrderNumber();
+    const today = new Date().toISOString().slice(0, 10);
+    const copy = JSON.parse(JSON.stringify(source));
+    const reset = {
+      orderTitle,
+      orderNumber,
+      quoteDate: today,
+      estimatedDeliveryDate: '',
+      status: 'Prospecto',
+      deliveryState: 'Abierta',
+      attachments: [],
+      invoicePdfDataUrl: '',
+      invoicePdfName: '',
+      invoicePdfMimeType: '',
+      invoicePdfSizeKb: 0
+    };
+    const record = { ...copy, ...reset, id: uid('ot'), savedAt: new Date().toISOString() };
+    if (record.quote && typeof record.quote === 'object') Object.assign(record.quote, reset);
+    state.orders.unshift(record);
+    state.ui.selectedOrderId = record.id;
+    state.ui.orderFilter = 'Todas';
+    stampBaseUpdate('orders');
+    render();
+  }
+
   function loadOrderIntoQuote(orderId) {
     const record = findOrderById(orderId);
     if (!record?.quote) {
@@ -7044,7 +7107,7 @@ Objetivo
     const laborRows = (summary.laborLines || []).map((line, index) => ([
       String(index + 1),
       String(line.employee?.name || line.externalResource?.name || '-'),
-      Number(line.orderHours ?? line.hours ?? 0).toLocaleString('es-CL', { maximumFractionDigits: 2 }),
+      formatHoursMinutes(line.orderHours ?? line.hours ?? 0),
       formatCurrency(line.realRate || line.rate || 0),
       formatCurrency(line.orderTotal ?? line.lineTotal ?? 0)
     ]));
@@ -7125,7 +7188,7 @@ Objetivo
       ['Subtotal produccion', formatCurrency(summary.productionCost || 0)],
       ['Total logistica', formatCurrency(summary.logisticsTotal || 0)],
       ['Costo total OT', formatCurrency(summary.totalCost || 0)],
-      ['Horas imputadas', `${Number(summary.totalLaborHours || 0).toLocaleString('es-CL', { maximumFractionDigits: 2 })} h`],
+      ['Tiempo imputado', formatHoursMinutes(summary.totalLaborHours)],
       ['Tasa CIF/h', formatCurrency(summary.cifPerHourApplied ?? scenario.cifPerHour ?? 0)],
       ['Margen real', formatPercent(summary.realMargin || 0)]
     ];
@@ -8800,7 +8863,7 @@ Objetivo
           <span class="rent-block-value">${percent}% · ${formatCurrency(applied)} de ${formatCurrency(max)} / mes</span>
         </div>
         <div class="rent-options">${options}</div>
-        <div class="small">Esta OT carga ${formatCurrency(summary.cifRentTotal || 0)} de arriendo (${Number(summary.cifHours || 0).toLocaleString('es-CL', { maximumFractionDigits: 2 })} h × ${formatCurrency(summary.cifRentPerHour || 0)}/h).</div>
+        <div class="small">Esta OT carga ${formatCurrency(summary.cifRentTotal || 0)} de arriendo (${formatHoursMinutes(summary.cifHours)} × ${formatCurrency(summary.cifRentPerHour || 0)}/h).</div>
       </div>`;
   }
 
@@ -9412,6 +9475,42 @@ Objetivo
     return 'Queda bajo el valor promedio proyectado por orden';
   }
 
+  // Muestra horas decimales como "1 h 30 min" / "45 min".
+  function formatHoursMinutes(hours) {
+    const totalMinutes = Math.round((Number(hours) || 0) * 60);
+    const h = Math.floor(totalMinutes / 60);
+    const m = totalMinutes % 60;
+    if (!h) return `${m} min`;
+    return m ? `${h} h ${m} min` : `${h} h`;
+  }
+
+  function renderLaborTimeInputs(line) {
+    const totalMinutes = Math.round((Number(line.hours) || 0) * 60);
+    const h = Math.floor(totalMinutes / 60);
+    const m = totalMinutes % 60;
+    return `
+      <div class="labor-time-split">
+        <span class="input-suffix-wrap"><input class="input-sm" type="number" min="0" step="1" inputmode="numeric" data-labor-time="h" data-id="${line.id}" value="${h}" aria-label="Horas" /><span class="input-suffix">h</span></span>
+        <span class="input-suffix-wrap"><input class="input-sm" type="number" min="0" max="59" step="5" inputmode="numeric" data-labor-time="m" data-id="${line.id}" value="${m}" aria-label="Minutos" /><span class="input-suffix">min</span></span>
+      </div>`;
+  }
+
+  function renderQuoteEfficiencyField(summary) {
+    const scenarioPercent = Math.round((Number(state.scenario.efficiency) || 0.85) * 100);
+    const fromQuote = Boolean(summary.laborEfficiencyFromQuote);
+    const value = fromQuote ? Math.round((Number(summary.laborEfficiency) || 0) * 100) : '';
+    return `
+      <div class="quote-efficiency-row">
+        <div>
+          <label class="label-with-tip"><span>Eficiencia en esta OT</span>${renderInfoTip('Qué parte de tu tiempo en esta OT es trabajo efectivo. Sube al 100% cuando la máquina hace el trabajo y tú casi no intervienes (ej. corte láser): tu hora se cobra sin recargo. Déjalo vacío para usar la del escenario.')}</label>
+          <span class="input-suffix-wrap"><input type="number" min="10" max="100" step="5" inputmode="numeric" data-model="quote.efficiency" data-percent="true" value="${value}" placeholder="${scenarioPercent}" /><span class="input-suffix">%</span></span>
+        </div>
+        <div class="small">${fromQuote
+          ? `Usando ${value}% en esta OT (escenario: ${scenarioPercent}%). <button type="button" class="btn btn-soft btn-inline-link" data-action="reset-quote-efficiency">Usar la del escenario</button>`
+          : `Usando la del escenario: ${scenarioPercent}%.`}</div>
+      </div>`;
+  }
+
   function renderLineScopeSelect(collection, line) {
     return `
       <select class="input-sm" data-collection="${collection}" data-id="${line.id}" data-key="scope" title="Por pieza: se multiplica por las unidades. Por pedido: se cobra una vez.">
@@ -9531,7 +9630,7 @@ Objetivo
             <input type="number" min="0" step="0.01" data-collection="quote.materials" data-id="${line.id}" data-key="quantity" value="${line.quantity}" />
             <div class="waste-inline waste-inline-compact">
               <label class="small">Merma %</label>
-              <input class="input-sm waste-input-sm" type="number" min="0" step="0.1" data-collection="quote.materials" data-id="${line.id}" data-key="wastePercent" value="${wastePercent}" />
+              <span class="input-suffix-wrap"><input class="input-sm waste-input-sm" type="number" min="0" max="100" step="0.5" inputmode="decimal" data-collection="quote.materials" data-id="${line.id}" data-key="wastePercent" value="${wastePercent}" title="Merma en %: escribe 10 para 10%" /><span class="input-suffix">%</span></span>
             </div>
           </td>
           <td class="cell-amount">
@@ -9559,7 +9658,7 @@ Objetivo
       const isExternal = Boolean(line.externalResource);
       const rateHelp = isExternal
         ? 'Ayuda externa: se respeta el valor hora ingresado en su subbase, sin corrección por eficiencia.'
-        : 'Valor hora real productivo = valor hora nominal dividido por la eficiencia del escenario activo.';
+        : 'Valor hora real productivo = valor hora nominal dividido por la eficiencia de esta OT (o la del escenario si la OT no define una).';
 
       return `
         <tr>
@@ -9568,7 +9667,7 @@ Objetivo
             ${isExternal ? `<div class="small">${sanitize(line.externalResource?.type || 'Ayuda externa')}</div>` : ''}
           </td>
           <td>
-            <input type="number" min="0" step="0.25" data-collection="quote.labor" data-id="${line.id}" data-key="hours" value="${line.hours}" />
+            ${renderLaborTimeInputs(line)}
             ${renderLineScopeSelect('quote.labor', line)}
           </td>
           <td>
@@ -9580,7 +9679,7 @@ Objetivo
           </td>
           <td class="cell-amount">
             <strong>${formatCurrency(line.orderTotal)}</strong>
-            ${hasMultipleUnits && line.scope === 'unit' ? `<div class="small">${Number(line.orderHours || 0).toLocaleString('es-CL', { maximumFractionDigits: 2 })} h en total</div>` : ''}
+            ${hasMultipleUnits && line.scope === 'unit' ? `<div class="small">${formatHoursMinutes(line.orderHours)} en total</div>` : ''}
             ${isExternal ? '<div class="small">Sin CIF (externo)</div>' : ''}
           </td>
           <td class="labor-note-cell">
@@ -9730,7 +9829,7 @@ Objetivo
             <thead>
               <tr>
                 <th>Empleado</th>
-                <th>Horas</th>
+                <th>Tiempo</th>
                 <th>Valor base</th>
                 <th>Valor hora real</th>
                 <th>Total</th>
@@ -9749,7 +9848,7 @@ Objetivo
             </tbody>
           </table>
         </div>
-        <p class="help">La eficiencia ya impacta el valor hora real mostrado en esta tabla.</p>
+        ${renderQuoteEfficiencyField(calc.quoteSummary)}
       </div>
 
       <div class="card">
@@ -9788,7 +9887,7 @@ Objetivo
         </div>
         ${renderRentBlock(calc.quoteSummary)}
         <div class="kpi-grid kpi-grid-compact-3">
-          <div class="kpi-box"><span>Horas que cargan CIF</span><strong>${Number(calc.quoteSummary.cifHours || 0).toLocaleString('es-CL', { maximumFractionDigits: 2 })} h</strong>${calc.quoteSummary.cifHours < calc.quoteSummary.totalLaborHours ? '<span class="small">Sin horas externas</span>' : ''}</div>
+          <div class="kpi-box"><span>Tiempo que carga CIF</span><strong>${formatHoursMinutes(calc.quoteSummary.cifHours)}</strong>${calc.quoteSummary.cifHours < calc.quoteSummary.totalLaborHours ? '<span class="small">Sin horas externas</span>' : ''}</div>
           <div class="kpi-box"><span>Tasa CIF/h aplicada</span><strong>${formatCurrency(calc.quoteSummary.cifPerHourApplied || 0)}</strong><span class="small">Operativos ${formatCurrency(calc.quoteSummary.cifCashPerHour || 0)} + arriendo ${formatCurrency(calc.quoteSummary.cifRentPerHour || 0)}</span></div>
           <div class="kpi-box"><span>Total CIF aplicado</span><strong>${formatCurrency(calc.quoteSummary.cifTotal || 0)}</strong></div>
         </div>
@@ -10595,6 +10694,7 @@ Objetivo
 
           <div class="inline-actions ot-preview-actions">
             <button class="btn btn-primary" data-action="load-order-to-quote" data-id="${selectedOrder.id}">Cargar en presupuestador para editar</button>
+            <button class="btn btn-soft" data-action="duplicate-order-system" data-id="${selectedOrder.id}">Duplicar OT</button>
             <button class="btn btn-soft" data-action="delete-order-system" data-id="${selectedOrder.id}">Quitar del panel</button>
           </div>
         </div>
@@ -13525,7 +13625,7 @@ Objetivo
     const laborRows = summary.laborLines.map((line) => `
       <tr>
         <td>${sanitize(line.employee?.name || line.externalResource?.name || line.customEmployeeName || 'Sin asignar')}</td>
-        <td>${line.orderHours ?? line.hours}</td>
+        <td>${formatHoursMinutes(line.orderHours ?? line.hours)}</td>
         <td>${formatCurrency(line.realRate || line.rate || 0)}</td>
         <td>${formatCurrency(line.orderTotal ?? line.lineTotal)}</td>
       </tr>
