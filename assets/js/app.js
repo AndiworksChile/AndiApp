@@ -3867,6 +3867,9 @@ Objetivo
         state.ui.selectedOrderId = actionBtn.dataset.id || null;
         state.currentView = 'orders';
         render();
+        if (isMobileViewport()) {
+          document.querySelector('.ot-preview')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
       }
 
       if (action === 'go-to-finance-entry') {
@@ -3891,7 +3894,7 @@ Objetivo
       if (action === 'delete-order-system') {
         const orderId = actionBtn.dataset.id || '';
         if (!orderId) return;
-        if (!confirmSafe('¿Quieres quitar esta OT del panel del sistema?')) {
+        if (!confirmSafe('¿Quieres borrar esta OT del panel? Esta acción no se puede deshacer.')) {
           return;
         }
         const beforeCount = (state.orders || []).length;
@@ -5472,9 +5475,8 @@ Objetivo
         const lineId = target.dataset.id;
         const line = (state.quote.labor || []).find((item) => item.id === lineId);
         if (line) {
-          const read = (part) => Math.max(0, Number(document.querySelector(`[data-labor-time="${part}"][data-id="${lineId}"]`)?.value) || 0);
-          const totalMinutes = Math.round(read('h') * 60 + read('m'));
-          line.hours = Number((totalMinutes / 60).toFixed(4));
+          const minutes = Math.max(0, Number(String(target.value).replace(',', '.')) || 0);
+          line.hours = Number((minutes / 60).toFixed(6));
         }
         render();
         return;
@@ -9477,7 +9479,11 @@ Objetivo
 
   // Muestra horas decimales como "1 h 30 min" / "45 min".
   function formatHoursMinutes(hours) {
-    const totalMinutes = Math.round((Number(hours) || 0) * 60);
+    const exactMinutes = (Number(hours) || 0) * 60;
+    if (exactMinutes > 0 && exactMinutes < 10 && Math.abs(exactMinutes - Math.round(exactMinutes)) > 0.01) {
+      return `${exactMinutes.toLocaleString('es-CL', { maximumFractionDigits: 1 })} min`;
+    }
+    const totalMinutes = Math.round(exactMinutes);
     const h = Math.floor(totalMinutes / 60);
     const m = totalMinutes % 60;
     if (!h) return `${m} min`;
@@ -9485,13 +9491,10 @@ Objetivo
   }
 
   function renderLaborTimeInputs(line) {
-    const totalMinutes = Math.round((Number(line.hours) || 0) * 60);
-    const h = Math.floor(totalMinutes / 60);
-    const m = totalMinutes % 60;
+    const minutes = Number(((Number(line.hours) || 0) * 60).toFixed(2));
     return `
       <div class="labor-time-split">
-        <span class="input-suffix-wrap"><input class="input-sm" type="number" min="0" step="1" inputmode="numeric" data-labor-time="h" data-id="${line.id}" value="${h}" aria-label="Horas" /><span class="input-suffix">h</span></span>
-        <span class="input-suffix-wrap"><input class="input-sm" type="number" min="0" max="59" step="5" inputmode="numeric" data-labor-time="m" data-id="${line.id}" value="${m}" aria-label="Minutos" /><span class="input-suffix">min</span></span>
+        <span class="input-suffix-wrap"><input class="input-sm" type="number" min="0" step="any" inputmode="decimal" data-labor-time="m" data-id="${line.id}" value="${minutes}" aria-label="Minutos" title="Tiempo en minutos (60 = 1 hora)" /><span class="input-suffix">min</span></span>
       </div>`;
   }
 
@@ -10568,23 +10571,19 @@ Objetivo
       const meta = getOrderStatusMeta(order.status || 'Prospecto');
       const deliveryState = order.deliveryState || order.quote?.deliveryState || 'Abierta';
       const delivered = isDeliveryCompleted(deliveryState);
-      const deliveryMeta = getDeliveryMeta(deliveryState);
       const marginAchievement = getMarginAchievement(order.quoteSummary || {});
-      const estimatedDeliveryDate = order.estimatedDeliveryDate || order.quote?.estimatedDeliveryDate || '-';
       const titleRaw = String(order.orderTitle || 'Orden sin título');
-      const titleClass = titleRaw.length > 74 ? 'is-very-long' : (titleRaw.length > 48 ? 'is-long' : '');
+      const hasInvoice = Boolean(getPrimaryAttachment(order, legacyOrderInvoiceAttachment));
       return `
         <button type="button" class="ot-card ${meta.className} ${delivered ? 'is-delivered' : ''} ${idsEqual(selectedOrder?.id, order.id) ? 'selected' : ''}" data-action="open-order-card" data-id="${order.id}">
-          <div class="ot-card-top">
-            ${renderOrderStatusPill(order.status || 'Prospecto')}
-            ${renderDeliveryPill(deliveryState)}
-          </div>
           <div class="ot-card-body">
-            <strong class="ot-card-title ${titleClass}">${sanitize(titleRaw)}</strong>
-            <div class="small">${sanitize(order.orderNumber || '-')}</div>
-            <div class="small">${sanitize(order.customerName || '-')}</div>
-            <div class="small"><strong>Fecha ingreso:</strong> ${sanitize(order.quoteDate || '-')}</div>
-            <div class="small"><strong>Fecha entrega:</strong> <strong>${sanitize(estimatedDeliveryDate)}</strong></div>
+            <div class="small ot-card-number">${sanitize(order.orderNumber || '-')}</div>
+            <strong class="ot-card-title" title="${sanitize(titleRaw)}">${sanitize(titleRaw)}</strong>
+            <div class="ot-card-tags">
+              ${renderOrderStatusPill(order.status || 'Prospecto')}
+              ${renderDeliveryPill(deliveryState)}
+              <span class="ot-invoice-flag ${hasInvoice ? 'is-ok' : 'is-missing'}" title="${hasInvoice ? 'Boleta/factura adjunta' : 'Sin boleta/factura'}">${hasInvoice ? '✓ Boleta' : '⚠ Sin boleta'}</span>
+            </div>
           </div>
           <div class="ot-card-bottom-row">
             <div class="ot-card-price">${formatCurrency(order.quoteSummary?.effectiveGross || order.priceGross || 0)}</div>
@@ -10597,12 +10596,100 @@ Objetivo
     const selectedDeliveryState = selectedOrder?.deliveryState || selectedOrder?.quote?.deliveryState || 'Abierta';
     const selectedAchievement = selectedOrder ? getMarginAchievement(selectedOrder.quoteSummary || {}) : { iconMarkup: '', tone: 'warn', label: '' };
 
+    const renderPreview = () => {
+      if (!selectedOrder) {
+        return '<div class="empty-state">Selecciona una OT de la lista para ver su detalle.</div>';
+      }
+      const sum = selectedOrder.quoteSummary || {};
+      const gross = Number(sum.effectiveGross || selectedOrder.priceGross || 0);
+      const net = Number(sum.effectiveNet || 0);
+      const contribution = Number(sum.contribution || 0);
+      const deliveryDate = selectedOrder.estimatedDeliveryDate || selectedOrder.quote?.estimatedDeliveryDate || '-';
+      const linkedEntries = (state.finance?.entries || []).filter(
+        (e) => e.category === 'Ventas' && e.orderId && idsEqual(e.orderId, selectedOrder.id)
+      ).sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')));
+      const totalCobrado = linkedEntries.reduce((s, e) => s + (Number(e.income) || 0), 0);
+      const pending = Math.max(0, gross - totalCobrado);
+      const rows = linkedEntries.map((e) => `
+        <tr>
+          <td class="small">${sanitize(formatFinanceDate(e.date))}</td>
+          <td><strong>${sanitize(e.title)}</strong>${e.detail ? `<br><span class="small">${sanitize(e.detail)}</span>` : ''}</td>
+          <td class="finance-income-cell">${formatCurrency(e.income)}</td>
+          <td><button class="btn btn-soft btn-xs" data-action="go-to-finance-entry" data-id="${sanitize(e.id)}" title="Ver en Finanzas">↗ Finanzas</button></td>
+        </tr>
+      `).join('');
+
+      return `
+        <div class="ot-preview-head">
+          <div class="ot-preview-number">${sanitize(selectedOrder.orderNumber || '-')}</div>
+          <h3 class="ot-preview-title">${sanitize(selectedOrder.orderTitle || 'Orden sin título')}</h3>
+          <div class="ot-card-tags">
+            ${renderOrderStatusPill(selectedOrder.status || 'Prospecto')}
+            <span class="achievement-pill ${selectedAchievement.tone}" title="${sanitize(selectedAchievement.label)}">${selectedAchievement.iconMarkup} ${sanitize(selectedAchievement.label)}</span>
+          </div>
+        </div>
+
+        <div class="ot-preview-section">
+          <div class="ot-preview-section-title">Datos</div>
+          <dl class="ot-preview-facts">
+            <div><dt>Cliente</dt><dd>${sanitize(selectedOrder.customerName || '-')}</dd></div>
+            <div><dt>Producto</dt><dd>${sanitize(selectedOrder.productName || '-')}</dd></div>
+            <div><dt>Fecha ingreso</dt><dd>${sanitize(selectedOrder.quoteDate || '-')}</dd></div>
+            <div><dt>Fecha entrega</dt><dd><strong>${sanitize(deliveryDate)}</strong></dd></div>
+          </dl>
+        </div>
+
+        <div class="ot-preview-section">
+          <div class="ot-preview-section-title">Precio</div>
+          <div class="ot-preview-price">
+            <div class="ot-preview-price-main"><span>Precio de venta (con IVA)</span><strong>${formatCurrency(gross)}</strong></div>
+            <div class="ot-preview-price-split">
+              <div><span>Neto</span><strong>${formatCurrency(net)}</strong></div>
+              <div><span>IVA</span><strong>${formatCurrency(gross - net)}</strong></div>
+            </div>
+          </div>
+          <dl class="ot-preview-facts ot-preview-facts-3">
+            <div><dt>Costo real</dt><dd>${formatCurrency(sum.totalCost || 0)}</dd></div>
+            <div><dt>Utilidad</dt><dd class="${contribution > 0 ? 'is-good' : 'is-bad'}">${formatCurrency(contribution)} <span class="small">(${formatPercent(sum.realMargin || 0)})</span></dd></div>
+            <div><dt>Sueldo</dt><dd>${formatCurrency(sum.laborTotal || 0)}</dd></div>
+          </dl>
+        </div>
+
+        <div class="ot-preview-section">
+          <div class="ot-preview-section-title">Entrega y boleta</div>
+          <div class="ot-preview-status-row">
+            <div><div class="small ot-invoice-title">Estado de entrega</div><div class="ot-preview-toggle-wrap">${renderDeliveryToggle(selectedDeliveryState, selectedOrder.id)}</div></div>
+            ${renderOrderInvoiceActions(selectedOrder)}
+          </div>
+        </div>
+
+        <div class="ot-preview-section">
+          <div class="ot-preview-section-title">Cobros registrados en Finanzas</div>
+          ${linkedEntries.length ? `
+            <table class="ot-preview-payments">
+              <thead><tr><th>Fecha</th><th>Descripción</th><th>Monto</th><th></th></tr></thead>
+              <tbody>${rows}</tbody>
+              <tfoot>
+                <tr><td colspan="2">Total cobrado</td><td class="finance-income-cell">${formatCurrency(totalCobrado)}</td><td></td></tr>
+                ${pending > 0 ? `<tr><td colspan="2">Por cobrar</td><td>${formatCurrency(pending)}</td><td></td></tr>` : ''}
+              </tfoot>
+            </table>` : '<div class="small">Sin cobros asociados a esta OT.</div>'}
+        </div>
+
+        <div class="ot-preview-actions-bar">
+          <button class="btn btn-primary" data-action="load-order-to-quote" data-id="${selectedOrder.id}">${iconSvg('edit')} Editar en presupuestador</button>
+          <button class="btn btn-soft" data-action="duplicate-order-system" data-id="${selectedOrder.id}">Duplicar</button>
+          <button class="btn btn-danger" data-action="delete-order-system" data-id="${selectedOrder.id}">${iconSvg('trash')} Borrar</button>
+        </div>
+      `;
+    };
+
     return `
       <div class="card">
         <div class="section-title">
           <div>
             <h2>Panel de Gestión de OT</h2>
-            <p class="subtitle">Aquí puedes ver las órdenes guardadas en el sistema y reabrirlas para edición cuando lo necesites.</p>
+            <p class="subtitle">Selecciona una OT de la lista para ver su detalle.</p>
           </div>
           <span class="pill ok">${(state.orders || []).length} OT</span>
         </div>
@@ -10615,90 +10702,13 @@ Objetivo
           <button class="btn btn-soft ${sortByOrderNumber ? 'active' : ''}" data-action="toggle-order-sort" title="Ordenar las OT por número de orden">${sortByOrderNumber ? '✓ ' : ''}Ordenar por N° OT</button>
         </div>
 
-        <div class="ot-grid">
-          ${cards || '<div class="empty-state">Todavía no hay órdenes guardadas en el sistema. Importa la Base OT desde la Central de Descargas.</div>'}
+        <div class="ot-layout">
+          <div class="ot-grid">
+            ${cards || '<div class="empty-state">Todavía no hay órdenes guardadas en el sistema. Importa la Base OT desde la Central de Descargas.</div>'}
+          </div>
+          ${selectedOrder || cards ? `<aside class="ot-preview">${renderPreview()}</aside>` : ''}
         </div>
       </div>
-
-      ${selectedOrder ? `
-        <div class="card">
-          <div class="section-title">
-            <div>
-              <h3>Vista Previa OT seleccionada</h3>
-              <p class="subtitle">Puedes revisarla aquí y cargarla nuevamente en el presupuestador en modo visualización y luego edición.</p>
-            </div>
-            <div class="inline-actions">
-              ${renderOrderStatusPill(selectedOrder.status || 'Prospecto')}
-              <span class="achievement-pill ${selectedAchievement.tone}" title="${sanitize(selectedAchievement.label)}">${selectedAchievement.iconMarkup} ${sanitize(selectedAchievement.label)}</span>
-            </div>
-          </div>
-
-          <div class="grid-2">
-            <div><strong>Orden:</strong><br />${sanitize(selectedOrder.orderTitle || '-')}</div>
-            <div><strong>N°:</strong><br />${sanitize(selectedOrder.orderNumber || '-')}</div>
-            <div><strong>Cliente:</strong><br />${sanitize(selectedOrder.customerName || '-')}</div>
-            <div><strong>Fecha ingreso:</strong><br />${sanitize(selectedOrder.quoteDate || '-')}</div>
-            <div><strong>Fecha entrega:</strong><br /><strong>${sanitize(selectedOrder.estimatedDeliveryDate || selectedOrder.quote?.estimatedDeliveryDate || '-')}</strong></div>
-            <div><strong>Producto:</strong><br />${sanitize(selectedOrder.productName || '-')}</div>
-          </div>
-
-          <div class="kpi-grid">
-            <div class="kpi-box"><span>Precio de venta</span><strong>${formatCurrency(selectedOrder.quoteSummary?.effectiveGross || selectedOrder.priceGross || 0)}</strong></div>
-            <div class="kpi-box"><span>Precio neto / IVA</span><strong>${formatCurrency(selectedOrder.quoteSummary?.effectiveNet || 0)}</strong><div class="small">IVA: ${formatCurrency((selectedOrder.quoteSummary?.effectiveGross || 0) - (selectedOrder.quoteSummary?.effectiveNet || 0))}</div></div>
-            <div class="kpi-box"><span>Costo real</span><strong>${formatCurrency(selectedOrder.quoteSummary?.totalCost || 0)}</strong></div>
-            <div class="kpi-box"><span>Utilidad / margen real</span><strong>${formatCurrency(selectedOrder.quoteSummary?.contribution || 0)}</strong><div class="small">Margen: ${formatPercent(selectedOrder.quoteSummary?.realMargin || 0)} · ${selectedAchievement.iconMarkup}</div></div>
-            <div class="kpi-box"><span>Sueldo</span><strong>${formatCurrency(selectedOrder.quoteSummary?.laborTotal || 0)}</strong></div>
-            <div class="kpi-box"><span>Entrega</span><div class="ot-preview-toggle-wrap">${renderDeliveryToggle(selectedDeliveryState, selectedOrder.id)}</div>${renderOrderInvoiceActions(selectedOrder)}</div>
-          </div>
-
-          ${(() => {
-            const linkedEntries = (state.finance?.entries || []).filter(
-              (e) => e.category === 'Ventas' && e.orderId && idsEqual(e.orderId, selectedOrder.id)
-            ).sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')));
-            if (linkedEntries.length === 0) return '';
-            const totalCobrado = linkedEntries.reduce((s, e) => s + (Number(e.income) || 0), 0);
-            const rows = linkedEntries.map((e) => `
-              <tr>
-                <td class="small">${sanitize(formatFinanceDate(e.date))}</td>
-                <td><strong>${sanitize(e.title)}</strong>${e.detail ? `<br><span class="small" style="color:var(--muted);">${sanitize(e.detail)}</span>` : ''}</td>
-                <td class="finance-income-cell">${formatCurrency(e.income)}</td>
-                <td style="text-align:center;">
-                  <button class="btn btn-soft btn-xs" data-action="go-to-finance-entry" data-id="${sanitize(e.id)}" title="Ver en Finanzas">↗ Finanzas</button>
-                </td>
-              </tr>
-            `).join('');
-            return `
-              <div style="margin-top:16px;">
-                <div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;margin-bottom:8px;">Cobros registrados en Finanzas</div>
-                <table style="width:100%;border-collapse:collapse;font-size:13px;">
-                  <thead>
-                    <tr style="border-bottom:1px solid var(--line);">
-                      <th style="text-align:left;padding:4px 8px 4px 0;font-weight:600;color:var(--muted);">Fecha</th>
-                      <th style="text-align:left;padding:4px 8px;font-weight:600;color:var(--muted);">Descripción</th>
-                      <th style="text-align:right;padding:4px 0 4px 8px;font-weight:600;color:var(--muted);">Monto</th>
-                      <th></th>
-                    </tr>
-                  </thead>
-                  <tbody>${rows}</tbody>
-                  <tfoot>
-                    <tr style="border-top:1px solid var(--line);">
-                      <td colspan="2" style="padding:4px 8px 4px 0;font-weight:700;">Total cobrado</td>
-                      <td class="finance-income-cell" style="font-weight:700;">${formatCurrency(totalCobrado)}</td>
-                      <td></td>
-                    </tr>
-                  </tfoot>
-                </table>
-              </div>
-            `;
-          })()}
-
-          <div class="inline-actions ot-preview-actions">
-            <button class="btn btn-primary" data-action="load-order-to-quote" data-id="${selectedOrder.id}">Cargar en presupuestador para editar</button>
-            <button class="btn btn-soft" data-action="duplicate-order-system" data-id="${selectedOrder.id}">Duplicar OT</button>
-            <button class="btn btn-soft" data-action="delete-order-system" data-id="${selectedOrder.id}">Quitar del panel</button>
-          </div>
-        </div>
-      ` : ''}
     `;
   }
 

@@ -1140,38 +1140,45 @@ td {
 .achievement-pill.warn { background: transparent; color: var(--warn); border-color: var(--warn); }
 
 /* ─── OT CARDS ─── */
-.ot-grid {
-  display: grid; grid-template-columns: repeat(auto-fill,minmax(210px,210px));
-  gap: 12px; justify-content: start; align-items: start;
+.ot-layout {
+  display: grid; grid-template-columns: minmax(300px, 400px) minmax(0, 1fr);
+  gap: 16px; align-items: start; margin-top: 12px;
 }
+.ot-grid { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .ot-card {
-  width: 100%; aspect-ratio: 0.9/1; min-height: 240px;
-  border: 1px solid var(--line); border-top: 2px solid var(--line-strong);
-  padding: 13px; background: var(--panel-soft); text-align: left;
-  display: flex; flex-direction: column; gap: 7px;
-  cursor: pointer; justify-content: space-between; overflow: hidden; position: relative;
+  width: 100%; padding: 9px 12px;
+  border: 1px solid var(--line); border-left: 3px solid var(--line-strong);
+  background: var(--panel-soft); text-align: left;
+  display: flex; flex-direction: row; align-items: center; gap: 10px;
+  cursor: pointer; overflow: hidden; position: relative;
   transition: var(--ct);
 }
-.ot-card:hover { box-shadow: none; transform: none; border-color: var(--accent); border-top-color: var(--accent); }
+.ot-card:hover { box-shadow: none; transform: none; border-top-color: var(--accent); border-right-color: var(--accent); border-bottom-color: var(--accent); }
 .ot-card.selected { outline: 2px solid var(--accent); outline-offset: -1px; }
-.ot-card-top { display: flex; flex-direction: column; align-items: flex-end; gap: 5px; }
-.ot-card-body { min-width: 0; display: flex; flex-direction: column; gap: 5px; }
+.ot-card-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.ot-card-number { font-size: 11px; font-weight: 700; letter-spacing: 0.02em; }
 .ot-card-title {
-  display: -webkit-box; line-clamp: 2; -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical; overflow: hidden; line-height: 1.26; font-weight: 700;
+  display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  font-size: 13px; line-height: 1.25; font-weight: 700; text-transform: uppercase;
 }
-.ot-card-title.is-long      { font-size: 12px; line-height: 1.22; }
-.ot-card-title.is-very-long { font-size: 11px; line-height: 1.20; }
-.ot-card-bottom-row {
-  display: flex; align-items: center; justify-content: space-between;
-  gap: 8px; margin-top: auto; padding-top: 5px;
+.ot-card-tags { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; margin-top: 2px; }
+.ot-card-tags .order-status-pill,
+.ot-card-tags .delivery-pill,
+.ot-invoice-flag { padding: 2px 6px; font-size: 9px; }
+.ot-invoice-flag {
+  display: inline-flex; align-items: center; gap: 3px;
+  font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; border: 1px solid currentColor;
 }
-.ot-card.status-prospect         { background: var(--panel-soft); border-top-color: #c9a24d; }
-.ot-card.status-accepted         { background: var(--panel-soft); border-top-color: #9b7edc; }
-.ot-card.status-abonado          { background: var(--panel-soft); border-top-color: #4f86c8; }
-.ot-card.status-delivered-paid   { background: var(--panel-soft); border-top-color: #3f9a5c; }
-.ot-card.status-delivered-unpaid { background: var(--panel-soft); border-top-color: #db8a3f; }
-.ot-card.status-paid             { background: var(--panel-soft); border-top-color: #4f86c8; }
+.ot-invoice-flag.is-ok      { color: var(--good); }
+.ot-invoice-flag.is-missing { color: var(--warn); }
+.ot-card-bottom-row { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; flex-shrink: 0; }
+.ot-card.status-prospect         { background: var(--panel-soft); border-left-color: #c9a24d; }
+.ot-card.status-accepted         { background: var(--panel-soft); border-left-color: #9b7edc; }
+.ot-card.status-abonado          { background: var(--panel-soft); border-left-color: #4f86c8; }
+.ot-card.status-delivered-paid   { background: var(--panel-soft); border-left-color: #3f9a5c; }
+.ot-card.status-delivered-unpaid { background: var(--panel-soft); border-left-color: #db8a3f; }
+.ot-card.status-paid             { background: var(--panel-soft); border-left-color: #4f86c8; }
+.ot-card.status-prototype        { border-left-color: var(--muted); }
 .ot-card.is-delivered {
   background: linear-gradient(135deg,#fff8de 0%,#fff1b0 45%,#ffe27a 100%);
   border-color: #d8ad32;
@@ -1186,13 +1193,13 @@ td {
 .ot-card.is-delivered .ot-card-price,
 .ot-card.is-delivered .ot-card-achievement { color: #9d7100; }
 .ot-card.is-delivered .small { color: #8f7440; }
-.ot-card-price { font-size: 16px; font-weight: 700; color: var(--ink); margin-top: 3px; }
+.ot-card-price { font-size: 15px; font-weight: 700; color: var(--ink); white-space: nowrap; }
 .ot-card-achievement {
-  font-size: 19px; font-weight: 700;
+  font-size: 15px; font-weight: 700;
   display: inline-flex; align-items: center; justify-content: center;
   flex-shrink: 0; min-width: 24px;
 }
-.ot-card-achievement .achievement-star { --star-size: 22px; }
+.ot-card-achievement .achievement-star { --star-size: 16px; }
 
 /* OT related */
 .ot-preview-toggle-wrap { margin-top: 8px; }
@@ -2003,8 +2010,63 @@ body.footer-in-view .sync-badge {
 .input-suffix-wrap input { min-width: 0; }
 .input-suffix { font-size: 11px; color: var(--muted); white-space: nowrap; }
 .labor-time-split { display: flex; gap: 6px; align-items: center; }
-.labor-time-split input { width: 52px; }
+.labor-time-split input { width: 64px; }
 .quote-efficiency-row { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px 16px; margin-top: 10px; }
 .quote-efficiency-row input { width: 80px; }
 .btn.btn-inline-link { padding: 2px 8px; min-height: 0; font-size: 11px; margin-left: 4px; }
 .input-suffix-wrap .waste-input-sm { width: 56px; }
+
+/* Vista previa OT (columna derecha) */
+.ot-preview {
+  position: sticky; top: 12px; min-width: 0;
+  max-height: calc(100vh - 24px); overflow-y: auto;
+  border: 1px solid var(--line); background: var(--panel); padding: 16px;
+  display: flex; flex-direction: column; gap: 14px;
+}
+.ot-preview-number { font-size: 12px; font-weight: 700; color: var(--muted); letter-spacing: 0.04em; }
+.ot-preview-title { margin: 2px 0 6px; font-size: 17px; line-height: 1.25; text-transform: uppercase; letter-spacing: 0.04em; }
+.ot-preview-section { border-top: 1px solid var(--line); padding-top: 10px; }
+.ot-preview-section-title {
+  font-size: 11px; font-weight: 700; color: var(--muted);
+  text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 8px;
+}
+.ot-preview-facts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 14px; margin: 0; }
+.ot-preview-facts-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); margin-top: 10px; }
+.ot-preview-facts dt { font-size: 11px; color: var(--muted); }
+.ot-preview-facts dd { margin: 1px 0 0; font-weight: 600; overflow-wrap: anywhere; }
+.ot-preview-facts dd.is-good { color: var(--good); }
+.ot-preview-facts dd.is-bad  { color: var(--warn); }
+.ot-preview-price { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 10px; }
+.ot-preview-price span { display: block; font-size: 11px; color: var(--muted); }
+.ot-preview-price-main strong { font-size: 24px; line-height: 1.1; }
+.ot-preview-price-split { display: flex; gap: 18px; }
+.ot-preview-price-split strong { font-size: 14px; }
+.ot-preview-status-row { display: flex; flex-wrap: wrap; gap: 12px 28px; align-items: flex-start; }
+.ot-preview-status-row .ot-invoice-block { margin-top: 0; }
+.ot-preview-payments { width: 100%; border-collapse: collapse; font-size: 13px; }
+.ot-preview-payments th { text-align: left; font-weight: 600; color: var(--muted); padding: 4px 6px 4px 0; border-bottom: 1px solid var(--line); }
+.ot-preview-payments td { padding: 4px 6px 4px 0; }
+.ot-preview-payments tfoot td { border-top: 1px solid var(--line); font-weight: 700; }
+.ot-preview-actions-bar {
+  display: flex; flex-wrap: wrap; gap: 8px;
+  border-top: 1px solid var(--line); padding-top: 12px;
+}
+.ot-preview-actions-bar .btn-danger { margin-left: auto; }
+
+@media (max-width: 1100px) {
+  .ot-layout { grid-template-columns: minmax(260px, 340px) minmax(0, 1fr); }
+  .ot-preview-facts-3 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+/* Móvil: una columna; tarjetas compactas con N° + título + precio con estrellas */
+@media (max-width: 780px) {
+  .ot-layout { grid-template-columns: 1fr; }
+  .ot-preview { position: static; max-height: none; padding: 12px; }
+  .ot-card { padding: 8px 10px; }
+  .ot-card .ot-card-tags { display: none; }
+  .ot-card-title { font-size: 12.5px; }
+  .ot-card-price { font-size: 14px; }
+  .ot-card-achievement .achievement-star { --star-size: 14px; }
+  .ot-preview-facts-3 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .ot-preview-actions-bar .btn { flex: 1 1 auto; }
+}
