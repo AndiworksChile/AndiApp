@@ -22,6 +22,22 @@ window.ERMStorage = (() => {
       .filter((item) => item.fileName && (item.storagePath || item.dataUrl));
   };
 
+  // El modo "utilidad objetivo" se eliminó. Para no cambiarle el precio a una OT que lo usaba,
+  // se convierte en "precio definido" con el mismo neto que tenía guardado.
+  function normalizeQuotePriceMode(quote, ivaRate) {
+    if (!quote) return quote;
+    if (quote.selectedPriceMode === 'target') {
+      const net = Number(quote.selectedPriceNet) || 0;
+      if (net > 0) {
+        quote.selectedPriceMode = 'custom';
+        quote.customPriceGross = Math.round(net * (1 + Math.max(0, Number(ivaRate) || 0)));
+      } else {
+        quote.selectedPriceMode = 'minimum';
+      }
+    }
+    return quote;
+  }
+
   function load() {
     try {
       const raw = readRaw();
@@ -158,8 +174,16 @@ window.ERMStorage = (() => {
       }
 
       if (!state.quote.selectedPriceMode) {
-        state.quote.selectedPriceMode = 'target';
+        state.quote.selectedPriceMode = 'minimum';
       }
+
+      // Gastos fijos: 'real' (sale plata) u 'oportunidad' (ej. arriendo de local propio).
+      state.scenario.fixedCosts = (state.scenario.fixedCosts || []).map((item) => ({
+        ...item,
+        costType: item.costType === 'oportunidad' || item.costType === 'real'
+          ? item.costType
+          : (/arriendo/i.test(String(item.name || '')) ? 'oportunidad' : 'real')
+      }));
 
       if (state.ui.databaseSection !== 'materials' && state.ui.databaseSection !== 'productTypes' && state.ui.databaseSection !== 'externalResources') {
         state.ui.databaseSection = 'materials';
@@ -250,6 +274,8 @@ window.ERMStorage = (() => {
         const parsedQty = Math.round(Number(state.quote.pieceQuantity));
         state.quote.pieceQuantity = Number.isFinite(parsedQty) && parsedQty >= 1 ? parsedQty : 1;
       }
+
+      normalizeQuotePriceMode(state.quote, state.scenario?.ivaRate);
 
       if (state.quote.selectedPriceMode === 'custom' && !(Number(state.quote.customPriceGross) > 0) && Number(state.quote.selectedPriceNet) > 0) {
         const ivaMultiplier = 1 + Math.max(0, Number(state.scenario?.ivaRate) || 0);
@@ -395,5 +421,5 @@ window.ERMStorage = (() => {
     backend = nextBackend;
   }
 
-  return { load, save, reset, setBackend };
+  return { load, save, reset, setBackend, normalizeQuotePriceMode };
 })();

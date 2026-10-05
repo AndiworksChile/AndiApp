@@ -1473,8 +1473,8 @@ Objetivo
     const laborTotal = Number(qs.laborTotal || 0);
     const laborLines = Array.isArray(qs.laborLines) ? qs.laborLines : [];
     const empLines = empId ? laborLines.filter((l) => l.employeeId === empId) : [];
-    const empTotal = empLines.reduce((s, l) => s + Number(l.lineTotal || 0), 0);
-    const empHours = empLines.reduce((s, l) => s + Number(l.hours || 0), 0);
+    const empTotal = empLines.reduce((s, l) => s + Number(l.orderTotal ?? l.lineTotal ?? 0), 0);
+    const empHours = empLines.reduce((s, l) => s + Number(l.orderHours ?? l.hours ?? 0), 0);
     let html = `<span style="font-size:11px;color:var(--muted);">Costo M.O. OT: <strong style="color:var(--brand);">${formatCurrency(laborTotal)}</strong>`;
     if (empId && empLines.length > 0) {
       html += ` &nbsp;·&nbsp; Empleado: <strong style="color:var(--brand);">${formatCurrency(empTotal)}</strong> (${empHours.toLocaleString('es-CL', { maximumFractionDigits: 2 })} h)`;
@@ -3448,7 +3448,7 @@ Objetivo
 
       if (action === 'add-fixed-cost') {
         const id = uid('fc');
-        state.scenario.fixedCosts.push({ id, name: 'Nuevo costo', periodicity: 'mensual', amount: 0 });
+        state.scenario.fixedCosts.push({ id, name: 'Nuevo costo', periodicity: 'mensual', amount: 0, costType: 'real' });
         render();
         if (isMobileViewport()) openScenarioItemModal('fixedCost', id);
       }
@@ -3914,12 +3914,11 @@ Objetivo
       }
 
       if (action === 'select-price-target') {
-        const mode = actionBtn.dataset.priceMode || 'target';
+        const mode = actionBtn.dataset.priceMode || 'minimum';
         state.quote.selectedPriceMode = mode;
         const calc = window.ERMCalc.calculateQuote(state);
         if (mode === 'breakEven') state.quote.selectedPriceNet = calc.quoteSummary.breakEvenNet;
         if (mode === 'minimum') state.quote.selectedPriceNet = calc.quoteSummary.minimumNet;
-        if (mode === 'target') state.quote.selectedPriceNet = calc.quoteSummary.targetUtilityNet;
         if (mode === 'ideal') state.quote.selectedPriceNet = calc.quoteSummary.idealNet;
         if (mode === 'custom' && (state.quote.customPriceGross === undefined || state.quote.customPriceGross === null)) {
           state.quote.customPriceGross = 0;
@@ -5415,6 +5414,10 @@ Objetivo
           }
         }
 
+        if (target.dataset.model === 'quote.rentApplied' || target.dataset.model === 'quote.learningRate') {
+          setByPath(state, target.dataset.model, Number(target.value) || 0);
+        }
+
         if (target.dataset.model === 'quote.pieceQuantity') {
           const parsedQty = Math.round(Number(state.quote.pieceQuantity));
           state.quote.pieceQuantity = Number.isFinite(parsedQty) && parsedQty >= 1 ? parsedQty : 1;
@@ -5423,7 +5426,9 @@ Objetivo
         const mustRerenderMain = target.dataset.model === 'quote.customerId'
           || target.dataset.model === 'quote.logistics.mode'
           || target.dataset.model === 'quote.status'
-          || target.dataset.model === 'quote.pieceQuantity';
+          || target.dataset.model === 'quote.pieceQuantity'
+          || target.dataset.model === 'quote.rentApplied'
+          || target.dataset.model === 'quote.learningRate';
         const isScenarioModel = String(target.dataset.model || '').startsWith('scenario.');
         if (mustRerenderMain || (isScenarioModel && state.currentView === 'scenario')) {
           render();
@@ -5513,6 +5518,13 @@ Objetivo
     document.addEventListener('input', (event) => {
       if (event.target?.id === 'notes-general-input') {
         handleNotesEditorInput();
+      }
+      if (event.target?.id === 'quote-rent-slider') {
+        const label = document.getElementById('quote-rent-label');
+        if (label) label.textContent = formatCurrency(Number(event.target.value) || 0);
+      }
+      if (event.target?.id === 'material-base-cost' || event.target?.id === 'material-base-cost-gross') {
+        syncMaterialIvaFields(event.target);
       }
       if (event.target?.id === 'fin-salida-general-type-input') {
         const typed = String(event.target.value || '').trim();
@@ -6476,7 +6488,7 @@ Objetivo
       deliveryState: 'Abierta',
       description: '',
       estimatedDeliveryDate: '',
-      selectedPriceMode: 'target',
+      selectedPriceMode: 'minimum',
       selectedPriceNet: 0,
       customPriceGross: 0,
       materials: [],
@@ -6757,6 +6769,7 @@ Objetivo
       ...JSON.parse(JSON.stringify(record.quote))
     };
     const orderAttachments = getOwnerAttachments(record, legacyOrderInvoiceAttachment);
+    window.ERMStorage.normalizeQuotePriceMode(state.quote, state.scenario?.ivaRate);
     state.quote.estimatedDeliveryDate = record.estimatedDeliveryDate || state.quote.estimatedDeliveryDate || '';
     state.quote.isPrototype = Boolean(record.isPrototype || state.quote.isPrototype || record.status === 'Prototipo');
     state.quote.attachments = orderAttachments;
@@ -7013,16 +7026,16 @@ Objetivo
       String(line.group || line.material?.group || '-'),
       String(line.material?.name || '-') + (String(line.comment || '').trim() ? ` (${String(line.comment).trim()})` : ''),
       Number(line.quantity || 0).toLocaleString('es-CL', { maximumFractionDigits: 2 }),
-      String(line.material?.unit || '-'),
-      formatCurrency(line.lineTotal || 0)
+      String(line.material?.unit || '-') + (line.scope === 'order' ? ' · por pedido' : ''),
+      formatCurrency(line.orderTotal ?? line.lineTotal ?? 0)
     ]));
 
     const laborRows = (summary.laborLines || []).map((line, index) => ([
       String(index + 1),
       String(line.employee?.name || line.externalResource?.name || '-'),
-      Number(line.hours || 0).toLocaleString('es-CL', { maximumFractionDigits: 2 }),
+      Number(line.orderHours ?? line.hours ?? 0).toLocaleString('es-CL', { maximumFractionDigits: 2 }),
       formatCurrency(line.realRate || line.rate || 0),
-      formatCurrency(line.lineTotal || 0)
+      formatCurrency(line.orderTotal ?? line.lineTotal ?? 0)
     ]));
 
     doc.setFont('helvetica', 'bold');
@@ -7096,13 +7109,13 @@ Objetivo
       ['Total insumos', formatCurrency(summary.materialsTotal || 0)],
       ['Total mano de obra', formatCurrency(summary.laborTotal || 0)],
       ['Total CIF', formatCurrency(summary.cifTotal || 0)],
-      ['Costo de una unidad', formatCurrency(summary.unitCost || 0)],
+      ['Costo promedio por unidad', formatCurrency(summary.unitCost || 0)],
       ['Unidades', String(pieceQuantity)],
       ['Subtotal produccion', formatCurrency(summary.productionCost || 0)],
       ['Total logistica', formatCurrency(summary.logisticsTotal || 0)],
       ['Costo total OT', formatCurrency(summary.totalCost || 0)],
       ['Horas imputadas', `${Number(summary.totalLaborHours || 0).toLocaleString('es-CL', { maximumFractionDigits: 2 })} h`],
-      ['Tasa CIF/h', formatCurrency(scenario.cifPerHour || 0)],
+      ['Tasa CIF/h', formatCurrency(summary.cifPerHourApplied ?? scenario.cifPerHour ?? 0)],
       ['Margen real', formatPercent(summary.realMargin || 0)]
     ];
 
@@ -7145,7 +7158,7 @@ Objetivo
     y += 1;
     sectionTitle('Escenarios de precios de venta (neto)');
     const priceSelection = buildPriceSelectionData(calc);
-    const selectedMode = String(summary.selectedPriceMode || 'target');
+    const selectedMode = String(summary.selectedPriceMode || 'minimum');
     const priceRows = [
       ...priceSelection.options.map((option) => [
         option.key === selectedMode ? 'X' : '',
@@ -8653,19 +8666,20 @@ Objetivo
 
         <div class="summary-row"><span>Materia prima</span><strong>${formatCurrency(summary.materialsTotal)}</strong></div>
         <div class="summary-row"><span>Mano de obra</span><strong>${formatCurrency(summary.laborTotal)}</strong></div>
-        <div class="summary-row"><span>CIF aplicados</span><strong>${formatCurrency(summary.cifTotal)}</strong></div>
-        <div class="summary-row"><span>Costo de una unidad</span><strong>${formatCurrency(summary.unitCost)}</strong></div>
+        <div class="summary-row"><span>CIF operativos</span><strong>${formatCurrency(summary.cifCashTotal)}</strong></div>
+        ${(summary.rentMonthlyMax || 0) > 0 ? `<div class="summary-row"><span>Arriendo (oportunidad)</span><strong>${formatCurrency(summary.cifRentTotal)}</strong></div>` : ''}
+        <div class="summary-row"><span>Subtotal producción</span><strong>${formatCurrency(summary.productionCost)}</strong></div>
         ${(summary.pieceQuantity || 1) > 1 ? `
         <div class="summary-row"><span>Unidades</span><strong>× ${summary.pieceQuantity}</strong></div>
-        <div class="summary-row"><span>Subtotal producción</span><strong>${formatCurrency(summary.productionCost)}</strong></div>` : ''}
+        <div class="summary-row"><span>Costo promedio por unidad</span><strong>${formatCurrency(summary.unitCost)}</strong></div>` : ''}
         <div class="summary-row"><span>Logística</span><strong>${formatCurrency(summary.logisticsTotal)}</strong></div>
         <div class="summary-row summary-row-total"><span>Costo total real</span><strong>${formatCurrency(summary.totalCost)}</strong></div>
 
         <div class="hr"></div>
 
+        ${(summary.cifRentTotal || 0) > 0 ? `<div class="summary-row"><span>Piso real (sin arriendo)</span><strong>${formatCurrency(summary.cashFloorNet)}</strong></div>` : ''}
         <div class="summary-row"><span>Precio equilibrio</span><strong>${formatCurrency(summary.breakEvenNet)}</strong></div>
         <div class="summary-row"><span>Precio mínimo</span><strong>${formatCurrency(summary.minimumNet)}</strong></div>
-        <div class="summary-row"><span>Precio utilidad</span><strong>${formatCurrency(summary.targetUtilityNet)}</strong></div>
         <div class="summary-row"><span>Precio ideal</span><strong>${formatCurrency(summary.idealNet)}</strong></div>
 
         <div class="hr"></div>
@@ -8728,6 +8742,11 @@ Objetivo
             </select>
           </td>
           <td><input type="text" data-format="clp" data-collection="scenario.fixedCosts" data-id="${item.id}" data-key="amount" value="${formatNumber(item.amount || 0)}" /></td>
+          <td>
+            <select data-collection="scenario.fixedCosts" data-id="${item.id}" data-key="costType">
+              ${renderCostTypeOptions(item.costType)}
+            </select>
+          </td>
           <td>${factor.toFixed(2)}</td>
           <td>${formatCurrency(total)}</td>
           <td><button class="btn btn-soft btn-icon" title="Eliminar costo" aria-label="Eliminar costo" data-action="remove-fixed-cost" data-id="${item.id}">${iconSvg('trash')}</button></td>
@@ -8740,7 +8759,7 @@ Objetivo
       const factor = window.ERMCalc.periodicityFactor(item.periodicity, scenario.periodMonths);
       return `
         <div class="scn-mini-card" role="button" tabindex="0" data-action="open-scenario-item" data-kind="fixedCost" data-id="${item.id}">
-          <div class="scn-mini-main"><strong>${sanitize(item.name || 'Sin nombre')}</strong><span>${sanitize(periodicityLabel(item.periodicity))} · ${formatCurrency(item.amount || 0)} · factor ${factor.toFixed(2)}</span></div>
+          <div class="scn-mini-main"><strong>${sanitize(item.name || 'Sin nombre')}</strong><span>${sanitize(periodicityLabel(item.periodicity))} · ${formatCurrency(item.amount || 0)} · factor ${factor.toFixed(2)}${item.costType === 'oportunidad' ? ' · oportunidad' : ''}</span></div>
           <div class="scn-mini-value"><strong>${formatCurrency(item.amount * factor)}</strong><span>en período</span></div>
         </div>`;
     }).join('');
@@ -8830,6 +8849,7 @@ Objetivo
                 <th>Concepto</th>
                 <th>Periodicidad</th>
                 <th>Monto</th>
+                <th class="label-with-tip"><span>Tipo</span>${renderInfoTip('Real: sale plata de tu bolsillo. Oportunidad: no lo pagas (ej. arriendo de un local propio); en cada OT eliges cuánto cargar con el deslizador de CIF.')}</th>
                 <th class="label-with-tip"><span>Factor</span>${renderInfoTip('Multiplicador que adapta cada costo al período proyectado. Ejemplo: en 1 mes, un costo mensual vale 1 y un costo anual vale 0.08 aproximadamente.')}</th>
                 <th>Total en período</th>
                 <th></th>
@@ -8838,7 +8858,7 @@ Objetivo
             <tbody>
               ${fixedRows}
               <tr class="table-total">
-                <td colspan="4"><strong>Total CIF del período</strong></td>
+                <td colspan="5"><strong>Total CIF del período</strong></td>
                 <td><strong>${formatCurrency(calc.scenarioSummary.fixedCostsTotal)}</strong></td>
                 <td></td>
               </tr>
@@ -9172,15 +9192,12 @@ Objetivo
     switch (mode) {
       case 'breakEven':
         return { label: 'Precio equilibrio', short: 'Equilibrio', className: 'price-tone-break-even' };
-      case 'minimum':
-        return { label: `Precio ${formatPercent(state.scenario.minimumMargin)} mínimo`, short: 'Mínimo', className: 'price-tone-minimum' };
       case 'ideal':
         return { label: `Precio ${formatPercent(state.scenario.idealMargin)} ideal`, short: 'Ideal', className: 'price-tone-ideal' };
       case 'custom':
         return { label: 'Precio definido', short: 'Definido', className: 'price-tone-custom' };
-      case 'target':
       default:
-        return { label: 'Precio utilidad objetivo', short: 'Utilidad', className: 'price-tone-target' };
+        return { label: `Precio ${formatPercent(state.scenario.minimumMargin)} mínimo`, short: 'Mínimo', className: 'price-tone-minimum' };
     }
   }
 
@@ -9239,6 +9256,14 @@ Objetivo
     return 'Queda bajo el valor promedio proyectado por orden';
   }
 
+  function renderLineScopeSelect(collection, line) {
+    return `
+      <select class="input-sm" data-collection="${collection}" data-id="${line.id}" data-key="scope" title="Por pieza: se multiplica por las unidades. Por pedido: se cobra una vez.">
+        <option value="unit" ${line.scope !== 'order' ? 'selected' : ''}>Por pieza</option>
+        <option value="order" ${line.scope === 'order' ? 'selected' : ''}>Por pedido</option>
+      </select>`;
+  }
+
   function buildPriceSelectionData(calc) {
     const summary = calc.quoteSummary;
     const projection = calc.scenarioSummary.projection || {};
@@ -9254,12 +9279,6 @@ Objetivo
         label: `Precio ${formatPercent(state.scenario.minimumMargin)} mínimo`,
         description: 'Aplica el margen mínimo.',
         price: summary.minimumNet
-      },
-      {
-        key: 'target',
-        label: 'Precio utilidad objetivo',
-        description: 'Apunta a la meta de utilidad.',
-        price: summary.targetUtilityNet || summary.minimumNet
       },
       {
         key: 'ideal',
@@ -9313,6 +9332,9 @@ Objetivo
 
     const materialGroups = [...new Set(database.materials.map((item) => item.group).filter(Boolean))];
 
+    const pieceQuantity = calc.quoteSummary.pieceQuantity || 1;
+    const hasMultipleUnits = pieceQuantity > 1;
+
     const materialRows = calc.quoteSummary.materialLines.map((line) => {
       const currentGroup = line.group || line.material?.group || materialGroups[0] || '';
       const wastePercent = Number(line.wastePercent) || 0;
@@ -9357,9 +9379,11 @@ Objetivo
             </div>
           </td>
           <td class="cell-amount">
-            <strong>${formatCurrency(line.lineTotal)}</strong>
+            <strong>${formatCurrency(line.orderTotal)}</strong>
+            ${hasMultipleUnits && line.scope === 'unit' ? `<div class="small">${formatCurrency(line.lineTotal)} × ${pieceQuantity} u.</div>` : ''}
             <div class="small">Base: ${formatCurrency(line.baseLineTotal || 0)}</div>
             <div class="small">Merma: ${formatCurrency(line.wasteAmount || 0)}</div>
+            ${renderLineScopeSelect('quote.materials', line)}
             ${line.material ? `<input class="input-sm material-line-comment" type="text" maxlength="80" data-collection="quote.materials" data-id="${line.id}" data-key="comment" value="${sanitize(line.comment || '')}" placeholder="¿A qué parte corresponde?" title="Comentario: diferencia para qué parte del producto es este insumo" />` : ''}
           </td>
           <td>
@@ -9389,6 +9413,7 @@ Objetivo
           </td>
           <td>
             <input type="number" min="0" step="0.25" data-collection="quote.labor" data-id="${line.id}" data-key="hours" value="${line.hours}" />
+            ${renderLineScopeSelect('quote.labor', line)}
           </td>
           <td>
             <input type="text" data-format="clp" min="0" step="1" data-collection="quote.labor" data-id="${line.id}" data-key="rate" value="${formatNumber(line.rate || 0)}" />
@@ -9397,7 +9422,11 @@ Objetivo
             <div class="unit-cost-inline"><strong>${formatCurrency(line.realRate || 0)}</strong>${renderInfoTip(rateHelp)}</div>
             <div class="small">${isExternal ? 'Sin corrección por eficiencia' : `E: ${formatPercent(line.efficiencyApplied || scenario.efficiency)}`}</div>
           </td>
-          <td class="cell-amount"><strong>${formatCurrency(line.lineTotal)}</strong></td>
+          <td class="cell-amount">
+            <strong>${formatCurrency(line.orderTotal)}</strong>
+            ${hasMultipleUnits && line.scope === 'unit' ? `<div class="small">${Number(line.orderHours || 0).toLocaleString('es-CL', { maximumFractionDigits: 2 })} h en total</div>` : ''}
+            ${isExternal ? '<div class="small">Sin CIF (externo)</div>' : ''}
+          </td>
           <td class="labor-note-cell">
             ${isExternal
               ? `<span class="small">${sanitize(line.externalResource?.description || 'Sin nota en subbase')}</span>`
@@ -9409,7 +9438,7 @@ Objetivo
     }).join('');
 
     const priceSelection = buildPriceSelectionData(calc);
-    const selectedPriceMeta = getPriceModeMeta(calc.quoteSummary.selectedPriceMode || 'target');
+    const selectedPriceMeta = getPriceModeMeta(calc.quoteSummary.selectedPriceMode || 'minimum');
     const priceCards = priceSelection.options.map((option) => `
       <button type="button" class="price-choice-card ${option.className} ${option.selected ? 'selected' : ''}" data-action="select-price-target" data-price-mode="${option.key}">
         <span class="price-choice-title">${sanitize(option.label)}</span>
@@ -9570,32 +9599,43 @@ Objetivo
       <div class="card">
         <div class="section-title">
           <div>
-            <h3>CIF aplicado a la orden</h3>
+            <h3>Cantidad de unidades</h3>
+          </div>
+        </div>
+        <div class="grid-2">
+          <div>
+            <label class="label-with-tip"><span>Unidades a fabricar</span>${renderInfoTip('Las líneas marcadas "Por pieza" se multiplican por esta cantidad. Las marcadas "Por pedido" (diseño, archivo, preparar máquina, limpieza) se cobran una sola vez. La logística nunca se multiplica.')}</label>
+            <input type="number" min="1" step="1" data-model="quote.pieceQuantity" value="${pieceQuantity}" />
+          </div>
+          <div>
+            <label class="label-with-tip"><span>Curva de aprendizaje</span>${renderInfoTip('Cada vez que se duplica la cantidad, el tiempo promedio por pieza baja a este porcentaje. Solo afecta las horas "Por pieza". 100% = sin curva (recomendado cuando la máquina marca el ritmo). 90% es típico en trabajo manual repetitivo.')}</label>
+            <select data-model="quote.learningRate">
+              ${[[1, '100% · sin curva'], [0.95, '95% · leve'], [0.9, '90% · manual repetitivo'], [0.85, '85% · muy repetitivo'], [0.8, '80% · fuerte']].map(([value, label]) => `<option value="${value}" ${Math.abs((Number(calc.quoteSummary.learningRate) || 1) - value) < 0.001 ? 'selected' : ''}>${label}</option>`).join('')}
+            </select>
           </div>
         </div>
         <div class="kpi-grid kpi-grid-compact-3">
-          <div class="kpi-box"><span>Horas imputadas</span><strong>${Number(calc.quoteSummary.totalLaborHours || 0).toLocaleString('es-CL', { maximumFractionDigits: 2 })} h</strong></div>
-          <div class="kpi-box"><span>Tasa CIF/h</span><strong>${formatCurrency(calc.scenarioSummary.cifPerHour || 0)}</strong></div>
-          <div class="kpi-box"><span>Total CIF aplicado</span><strong>${formatCurrency(calc.quoteSummary.cifTotal || 0)}</strong></div>
+          <div class="kpi-box"><span>Costo promedio por unidad</span><strong>${formatCurrency(calc.quoteSummary.unitCost || 0)}</strong></div>
+          <div class="kpi-box"><span>Unidades</span><strong>${pieceQuantity}</strong>${hasMultipleUnits && calc.quoteSummary.learningFactor < 1 ? `<span class="small">Horas por pieza × ${formatPercent(calc.quoteSummary.learningFactor)}</span>` : ''}</div>
+          <div class="kpi-box"><span>Subtotal producción</span><strong>${formatCurrency(calc.quoteSummary.productionCost || 0)}</strong></div>
         </div>
       </div>
 
       <div class="card">
         <div class="section-title">
           <div>
-            <h3>Cantidad de unidades</h3>
+            <h3>CIF aplicado a la orden</h3>
           </div>
         </div>
-        <div class="grid-2">
-          <div>
-            <label class="label-with-tip"><span>Unidades a fabricar</span>${renderInfoTip('Multiplica el costo de producción de una unidad (materia prima + mano de obra + CIF) por la cantidad de piezas iguales. La logística y el despacho se mantienen sin multiplicar porque corresponden a un único envío.')}</label>
-            <input type="number" min="1" step="1" data-model="quote.pieceQuantity" value="${Math.max(1, Math.round(Number(quote.pieceQuantity) || 1))}" />
-          </div>
-        </div>
+        ${(calc.quoteSummary.rentMonthlyMax || 0) > 0 ? `
+        <div>
+          <label class="label-with-tip"><span>Arriendo cargado (costo de oportunidad): <strong id="quote-rent-label">${formatCurrency(calc.quoteSummary.rentApplied)}</strong> de ${formatCurrency(calc.quoteSummary.rentMonthlyMax)} / mes</span>${renderInfoTip('El arriendo de un local propio no sale de tu bolsillo. Bájalo para competir en precio y súbelo cuando el cliente no compara. Al mínimo, el precio de equilibrio es tu piso real: bajo eso pierdes plata.')}</label>
+          <input id="quote-rent-slider" type="range" min="0" max="${calc.quoteSummary.rentMonthlyMax}" step="10000" data-model="quote.rentApplied" value="${calc.quoteSummary.rentApplied}" />
+        </div>` : ''}
         <div class="kpi-grid kpi-grid-compact-3">
-          <div class="kpi-box"><span>Costo de una unidad</span><strong>${formatCurrency(calc.quoteSummary.unitCost || 0)}</strong></div>
-          <div class="kpi-box"><span>Unidades</span><strong>${calc.quoteSummary.pieceQuantity || 1}</strong></div>
-          <div class="kpi-box"><span>Subtotal producción (× unidades)</span><strong>${formatCurrency(calc.quoteSummary.productionCost || 0)}</strong></div>
+          <div class="kpi-box"><span>Horas que cargan CIF</span><strong>${Number(calc.quoteSummary.cifHours || 0).toLocaleString('es-CL', { maximumFractionDigits: 2 })} h</strong>${calc.quoteSummary.cifHours < calc.quoteSummary.totalLaborHours ? '<span class="small">Sin horas externas</span>' : ''}</div>
+          <div class="kpi-box"><span>Tasa CIF/h aplicada</span><strong>${formatCurrency(calc.quoteSummary.cifPerHourApplied || 0)}</strong><span class="small">Operativos ${formatCurrency(calc.quoteSummary.cifCashPerHour || 0)} + arriendo ${formatCurrency(calc.quoteSummary.cifRentPerHour || 0)}</span></div>
+          <div class="kpi-box"><span>Total CIF aplicado</span><strong>${formatCurrency(calc.quoteSummary.cifTotal || 0)}</strong></div>
         </div>
       </div>
 
@@ -9835,6 +9875,30 @@ Objetivo
       ['min', '$/min'],
       ['unidad', '$/unidad']
     ].map(([value, label]) => `<option value="${value}" ${current === value ? 'selected' : ''}>${label}</option>`).join('');
+  }
+
+  function materialIvaMultiplier() {
+    return 1 + Math.max(0, Number(state.scenario?.ivaRate) || 0);
+  }
+
+  function materialGrossFromNet(net) {
+    return Math.round((Number(net) || 0) * materialIvaMultiplier());
+  }
+
+  // Mantiene sincronizados precio neto y con IVA: el campo que se edita manda y el otro se recalcula.
+  function syncMaterialIvaFields(source) {
+    const netInput = document.getElementById('material-base-cost');
+    const grossInput = document.getElementById('material-base-cost-gross');
+    if (!netInput || !grossInput) return;
+    const value = parseClpNumber(source.value);
+    if (source === grossInput) {
+      const net = Math.round(value / materialIvaMultiplier());
+      netInput.value = formatNumber(net);
+      state.ui.databaseDraft = { ...(state.ui.databaseDraft || {}), baseCost: net };
+      refreshMobileFormula();
+    } else {
+      grossInput.value = formatNumber(materialGrossFromNet(value));
+    }
   }
 
   function calculateMaterialPreview(form) {
@@ -10714,8 +10778,8 @@ Objetivo
           const laborTotal = Number(sqs.laborTotal || 0);
           const laborLines = Array.isArray(sqs.laborLines) ? sqs.laborLines : [];
           const empLines = draft.employeeId ? laborLines.filter((l) => l.employeeId === draft.employeeId) : [];
-          const empTotal = empLines.reduce((s, l) => s + Number(l.lineTotal || 0), 0);
-          const empHours = empLines.reduce((s, l) => s + Number(l.hours || 0), 0);
+          const empTotal = empLines.reduce((s, l) => s + Number(l.orderTotal ?? l.lineTotal ?? 0), 0);
+          const empHours = empLines.reduce((s, l) => s + Number(l.orderHours ?? l.hours ?? 0), 0);
           sueldoInfoHtml = `<span style="font-size:11px;color:var(--muted);">Costo M.O. OT: <strong style="color:var(--brand);">${formatCurrency(laborTotal)}</strong>`;
           if (draft.employeeId && empLines.length > 0) {
             sueldoInfoHtml += ` &nbsp;·&nbsp; Empleado: <strong style="color:var(--brand);">${formatCurrency(empTotal)}</strong> (${empHours.toLocaleString('es-CL', { maximumFractionDigits: 2 })} h)`;
@@ -12764,7 +12828,11 @@ Objetivo
               <div class="form-section-title"><span class="form-step">2</span> Coste base</div>
               <div class="m-pair">
                 <div><label>Unidad base</label><select id="material-calculation-unit" data-db-draft="calculationUnit">${renderCalculationUnitOptions(form.calculationUnit)}</select></div>
-                <div><label>Precio $</label><input id="material-base-cost" type="text" inputmode="numeric" data-format="clp" data-db-draft="baseCost" value="${formatNumber(form.baseCost || 0)}" /></div>
+                <div><label>Precio neto $</label><input id="material-base-cost" type="text" inputmode="numeric" data-format="clp" data-db-draft="baseCost" value="${formatNumber(form.baseCost || 0)}" placeholder="Sin IVA" /></div>
+              </div>
+              <div class="m-pair">
+                <div><label>Precio con IVA $</label><input id="material-base-cost-gross" type="text" inputmode="numeric" data-format="clp" value="${formatNumber(materialGrossFromNet(form.baseCost))}" placeholder="Con IVA" /></div>
+                <div class="small">El neto se usa como costo. Ingresa cualquiera de los dos y el otro se calcula solo.</div>
               </div>
               ${renderDatabaseCalculationFields(form)}
               ${buildFormulaBlock(form, preview)}
@@ -13012,7 +13080,8 @@ Objetivo
       <div class="m-pair">
         <div><label>Periodicidad</label><select ${attrs('periodicity')}>${renderPeriodicityOptions(item.periodicity)}</select></div>
         <div><label>Monto</label><input type="text" inputmode="numeric" data-format="clp" ${attrs('amount')} value="${formatNumber(item.amount || 0)}" /></div>
-      </div>` : `
+      </div>
+      <div class="scn-modal-field"><label>Tipo</label><select ${attrs('costType')}>${renderCostTypeOptions(item.costType)}</select></div>` : `
       <div class="scn-modal-field"><label>Nombre</label><input ${attrs('name')} value="${sanitize(item.name)}" /></div>
       <div class="m-pair">
         <div><label>Valor hora</label><input type="text" inputmode="numeric" data-format="clp" ${attrs('hourlyRate')} value="${formatNumber(item.hourlyRate || 0)}" /></div>
@@ -13181,7 +13250,7 @@ Objetivo
 
           <div class="form-section">
             <div class="form-section-title"><span class="form-step">2</span> Costeo base</div>
-            <div class="database-grid database-grid-3 compact-grid costeo-grid align-end">
+            <div class="database-grid database-grid-4 compact-grid costeo-grid align-end">
               <div>
                 <label class="label-with-tip">
                   <span>Unidad base de cálculo</span>
@@ -13192,8 +13261,15 @@ Objetivo
                 </select>
               </div>
               <div>
-                <label>Precio $</label>
-                <input id="material-base-cost" type="text" data-format="clp" min="0" step="1" data-db-draft="baseCost" value="${formatNumber(form.baseCost || 0)}" placeholder="Precio en CLP" />
+                <label class="label-with-tip">
+                  <span>Precio neto $</span>
+                  ${renderInfoTip('Precio sin IVA. Es el que se usa como costo en el presupuestador (el IVA de compra es crédito fiscal). Si ingresas el precio con IVA, este se calcula solo.')}
+                </label>
+                <input id="material-base-cost" type="text" data-format="clp" min="0" step="1" data-db-draft="baseCost" value="${formatNumber(form.baseCost || 0)}" placeholder="Sin IVA" />
+              </div>
+              <div>
+                <label>Precio con IVA $</label>
+                <input id="material-base-cost-gross" type="text" data-format="clp" min="0" step="1" value="${formatNumber(materialGrossFromNet(form.baseCost))}" placeholder="Con IVA" />
               </div>
               <div class="formula-preview formula-preview-compact card-soft">
                 <strong>Resultado aplicado</strong>
@@ -13286,17 +13362,17 @@ Objetivo
       <tr>
         <td>${sanitize(line.material?.name || 'Sin material')}${String(line.comment || '').trim() ? ` <span class="small">(${sanitize(String(line.comment).trim())})</span>` : ''}</td>
         <td>${line.quantity}</td>
-        <td>${sanitize(line.material?.unit || '')}</td>
-        <td>${formatCurrency(line.lineTotal)}</td>
+        <td>${sanitize(line.material?.unit || '')}${line.scope === 'order' ? ' · por pedido' : ''}</td>
+        <td>${formatCurrency(line.orderTotal ?? line.lineTotal)}</td>
       </tr>
     `).join('');
 
     const laborRows = summary.laborLines.map((line) => `
       <tr>
         <td>${sanitize(line.employee?.name || line.externalResource?.name || line.customEmployeeName || 'Sin asignar')}</td>
-        <td>${line.hours}</td>
+        <td>${line.orderHours ?? line.hours}</td>
         <td>${formatCurrency(line.realRate || line.rate || 0)}</td>
-        <td>${formatCurrency(line.lineTotal)}</td>
+        <td>${formatCurrency(line.orderTotal ?? line.lineTotal)}</td>
       </tr>
     `).join('');
 
@@ -13348,9 +13424,9 @@ Objetivo
           <div class="kpi-box"><span>Materia prima total</span><strong>${formatCurrency(summary.materialsTotal)}</strong></div>
           <div class="kpi-box"><span>Mano de obra total</span><strong>${formatCurrency(summary.laborTotal)}</strong></div>
           <div class="kpi-box"><span>CIF aplicados</span><strong>${formatCurrency(summary.cifTotal)}</strong></div>
-          <div class="kpi-box"><span>Costo de una unidad</span><strong>${formatCurrency(summary.unitCost)}</strong></div>
+          <div class="kpi-box"><span>Costo promedio por unidad</span><strong>${formatCurrency(summary.unitCost)}</strong></div>
           <div class="kpi-box"><span>Unidades</span><strong>${summary.pieceQuantity || 1}</strong></div>
-          <div class="kpi-box"><span>Subtotal producción (× unidades)</span><strong>${formatCurrency(summary.productionCost)}</strong></div>
+          <div class="kpi-box"><span>Subtotal producción</span><strong>${formatCurrency(summary.productionCost)}</strong></div>
           <div class="kpi-box"><span>Logística</span><strong>${formatCurrency(summary.logisticsTotal)}</strong></div>
           <div class="kpi-box"><span>Costo total real</span><strong>${formatCurrency(summary.totalCost)}</strong></div>
           <div class="kpi-box"><span>Precio seleccionado</span><strong>${formatCurrency(summary.effectiveNet)}</strong></div>
@@ -13373,6 +13449,12 @@ Objetivo
     ['anual', 'Anual'],
     ['unico', 'Único']
   ];
+
+  function renderCostTypeOptions(current) {
+    return [['real', 'Real'], ['oportunidad', 'Oportunidad']]
+      .map(([value, label]) => `<option value="${value}" ${(current === 'oportunidad' ? 'oportunidad' : 'real') === value ? 'selected' : ''}>${label}</option>`)
+      .join('');
+  }
 
   function renderPeriodicityOptions(current) {
     return PERIODICITY_OPTIONS.map(([value, label]) => `<option value="${value}" ${current === value ? 'selected' : ''}>${label}</option>`).join('');

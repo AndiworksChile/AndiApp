@@ -120,7 +120,7 @@ window.ERMDefaults = (() => {
       minimumMargin: 0.35,
       idealMargin: 0.55,
       fixedCosts: [
-        { id: uid('fc'), name: 'Arriendo taller', periodicity: 'mensual', amount: 300000 },
+        { id: uid('fc'), name: 'Arriendo taller', periodicity: 'mensual', amount: 300000, costType: 'oportunidad' },
         { id: uid('fc'), name: 'Internet', periodicity: 'mensual', amount: 17990 },
         { id: uid('fc'), name: 'Electricidad', periodicity: 'mensual', amount: 40000 },
         { id: uid('fc'), name: 'Agua', periodicity: 'mensual', amount: 30000 },
@@ -158,10 +158,12 @@ window.ERMDefaults = (() => {
       invoicePdfMimeType: '',
       invoicePdfSizeKb: 0,
       description: 'Ejemplo base para validar el flujo interno de cotización.',
-      selectedPriceMode: 'target',
+      selectedPriceMode: 'minimum',
       selectedPriceNet: 0,
       customPriceGross: 0,
       pieceQuantity: 1,
+      rentApplied: null,
+      learningRate: 1,
       materials: [],
       labor: [
         { id: uid('qll'), employeeId: andresId, assignmentType: 'hora', hours: 1, rate: 5000, directLabel: '', directCost: 0 }
