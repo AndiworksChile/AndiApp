@@ -1,1 +1,16 @@
-node_modules/
+# Lista blanca: solo se publica lo que la app necesita para funcionar en GitHub Pages.
+# Todo lo demás (respaldos, OT, instaladores, notas privadas) queda solo en tu computador.
+/*
+!/.gitignore
+!/index.html
+!/manifest.json
+!/package.json
+!/package-lock.json
+!/CLAUDE.md
+!/assets/
+
+# Basura del sistema y respaldos, aunque estén dentro de assets/
+.DS_Store
+*.dmg
+*.zip
+*backup*.json
