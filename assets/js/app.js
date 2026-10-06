@@ -8620,6 +8620,7 @@ Objetivo
   }
 
   function render() {
+    const otListScroll = refs.mainPanel?.querySelector('.ot-grid')?.scrollTop || 0;
     window.ERMStorage.save(state);
     const calc = window.ERMCalc.calculateQuote(state);
     renderTabs();
@@ -8628,6 +8629,11 @@ Objetivo
     renderInlinePdfViewerModal();
     syncAttendanceChronometer();
     renderActivityLog();
+    if (state.currentView === 'orders') {
+      fitOrdersLayout();
+      const grid = refs.mainPanel.querySelector('.ot-grid');
+      if (grid) grid.scrollTop = otListScroll;
+    }
   }
 
   function captureOpenFinanceDetailsState() {
@@ -10620,6 +10626,7 @@ Objetivo
       `).join('');
 
       return `
+        <div class="ot-preview-body">
         <div class="ot-preview-head">
           <div class="ot-preview-number">${sanitize(selectedOrder.orderNumber || '-')}</div>
           <h3 class="ot-preview-title">${sanitize(selectedOrder.orderTitle || 'Orden sin título')}</h3>
@@ -10629,6 +10636,8 @@ Objetivo
           </div>
         </div>
 
+        <div class="ot-preview-columns">
+        <div class="ot-preview-col">
         <div class="ot-preview-section">
           <div class="ot-preview-section-title">Datos</div>
           <dl class="ot-preview-facts">
@@ -10655,6 +10664,8 @@ Objetivo
           </dl>
         </div>
 
+        </div>
+        <div class="ot-preview-col">
         <div class="ot-preview-section">
           <div class="ot-preview-section-title">Entrega y boleta</div>
           <div class="ot-preview-status-row">
@@ -10675,6 +10686,9 @@ Objetivo
               </tfoot>
             </table>` : '<div class="small">Sin cobros asociados a esta OT.</div>'}
         </div>
+        </div>
+        </div>
+        </div>
 
         <div class="ot-preview-actions-bar">
           <button class="btn btn-primary" data-action="load-order-to-quote" data-id="${selectedOrder.id}">${iconSvg('edit')} Editar en presupuestador</button>
@@ -10694,17 +10708,18 @@ Objetivo
           <span class="pill ok">${(state.orders || []).length} OT</span>
         </div>
 
-        <div class="ot-order-controls">
-          <button type="button" class="btn btn-soft picker-trigger-btn" data-action="open-order-filter-picker" title="Filtrar OT por categoría">
-            <span class="picker-trigger-label">Categoría: ${sanitize(currentFilterLabel)}</span>
-            <span class="picker-trigger-caret" aria-hidden="true">▾</span>
-          </button>
-          <button class="btn btn-soft ${sortByOrderNumber ? 'active' : ''}" data-action="toggle-order-sort" title="Ordenar las OT por número de orden">${sortByOrderNumber ? '✓ ' : ''}Ordenar por N° OT</button>
-        </div>
-
         <div class="ot-layout">
-          <div class="ot-grid">
-            ${cards || '<div class="empty-state">Todavía no hay órdenes guardadas en el sistema. Importa la Base OT desde la Central de Descargas.</div>'}
+          <div class="ot-list-panel">
+            <div class="ot-list-controls">
+              <button type="button" class="btn btn-soft picker-trigger-btn" data-action="open-order-filter-picker" title="Filtrar OT por categoría">
+                <span class="picker-trigger-label">Categoría: ${sanitize(currentFilterLabel)}</span>
+                <span class="picker-trigger-caret" aria-hidden="true">▾</span>
+              </button>
+              <button class="btn btn-soft ${sortByOrderNumber ? 'active' : ''}" data-action="toggle-order-sort" title="Ordenar las OT por número de orden">${sortByOrderNumber ? '✓ ' : ''}Ordenar por N° OT</button>
+            </div>
+            <div class="ot-grid">
+              ${cards || '<div class="empty-state">Todavía no hay órdenes guardadas en el sistema. Importa la Base OT desde la Central de Descargas.</div>'}
+            </div>
           </div>
           ${selectedOrder || cards ? `<aside class="ot-preview">${renderPreview()}</aside>` : ''}
         </div>
@@ -10743,6 +10758,27 @@ Objetivo
       </div>
     `;
   }
+
+  // Escritorio: el Panel OT ocupa exactamente el alto visible; solo la lista de OT hace scroll.
+  function fitOrdersLayout() {
+    const layout = refs.mainPanel?.querySelector('.ot-layout');
+    if (!layout) return;
+    if (isMobileViewport()) { layout.style.height = ''; return; }
+    // También debe caber lo que queda bajo el panel: padding de la ficha, pie de página y los
+    // widgets flotantes, que index.html ancla bajo el pie cuando este entra en pantalla.
+    const shell = document.querySelector('.app-shell');
+    const footer = document.querySelector('.app-footer');
+    if (!shell) return;
+    const current = layout.getBoundingClientRect().height;
+    let contentBottom = shell.getBoundingClientRect().bottom;
+    const dockHeight = Math.max(0, ...[document.getElementById('activity-log-widget'), document.querySelector('.sync-badge')]
+      .filter(Boolean).map((el) => el.offsetHeight));
+    if (footer && dockHeight) contentBottom = Math.max(contentBottom, footer.getBoundingClientRect().bottom + 12 + dockHeight);
+    layout.style.height = `${Math.max(320, current + window.innerHeight - contentBottom - window.scrollY)}px`;
+  }
+  window.addEventListener('resize', () => {
+    if (state.currentView === 'orders') fitOrdersLayout();
+  });
 
   function isMobileViewport() {
     return typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(max-width: 780px)').matches;

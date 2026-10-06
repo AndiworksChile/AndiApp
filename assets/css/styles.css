@@ -1142,14 +1142,21 @@ td {
 /* ─── OT CARDS ─── */
 .ot-layout {
   display: grid; grid-template-columns: minmax(300px, 400px) minmax(0, 1fr);
-  gap: 16px; align-items: start; margin-top: 12px;
+  grid-template-rows: minmax(0, 1fr);
+  gap: 16px; align-items: stretch; margin-top: 12px;
 }
-.ot-grid { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.ot-list-panel { display: flex; flex-direction: column; min-width: 0; min-height: 0; border: 1px solid var(--line); background: var(--panel); }
+.ot-list-controls {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px;
+  padding: 10px; border-bottom: 1px solid var(--line); flex-shrink: 0;
+}
+.ot-list-controls .btn { min-width: 0; }
+.ot-grid { display: flex; flex-direction: column; gap: 6px; min-width: 0; min-height: 0; padding: 10px; overflow-y: auto; }
 .ot-card {
   width: 100%; padding: 9px 12px;
   border: 1px solid var(--line); border-left: 3px solid var(--line-strong);
   background: var(--panel-soft); text-align: left;
-  display: flex; flex-direction: row; align-items: center; gap: 10px;
+  display: flex; flex-direction: row; align-items: center; gap: 10px; flex-shrink: 0;
   cursor: pointer; overflow: hidden; position: relative;
   transition: var(--ct);
 }
@@ -2018,11 +2025,14 @@ body.footer-in-view .sync-badge {
 
 /* Vista previa OT (columna derecha) */
 .ot-preview {
-  position: sticky; top: 12px; min-width: 0;
-  max-height: calc(100vh - 24px); overflow-y: auto;
-  border: 1px solid var(--line); background: var(--panel); padding: 16px;
-  display: flex; flex-direction: column; gap: 14px;
+  min-width: 0; min-height: 0;
+  border: 1px solid var(--line); background: var(--panel);
+  display: flex; flex-direction: column;
 }
+.ot-preview-body { flex: 1; min-height: 0; overflow-y: auto; padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; }
+.ot-preview > .empty-state { padding: 16px; }
+.ot-preview-columns { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 22px; }
+.ot-preview-col { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
 .ot-preview-number { font-size: 12px; font-weight: 700; color: var(--muted); letter-spacing: 0.04em; }
 .ot-preview-title { margin: 2px 0 6px; font-size: 17px; line-height: 1.25; text-transform: uppercase; letter-spacing: 0.04em; }
 .ot-preview-section { border-top: 1px solid var(--line); padding-top: 10px; }
@@ -2048,20 +2058,28 @@ body.footer-in-view .sync-badge {
 .ot-preview-payments td { padding: 4px 6px 4px 0; }
 .ot-preview-payments tfoot td { border-top: 1px solid var(--line); font-weight: 700; }
 .ot-preview-actions-bar {
-  display: flex; flex-wrap: wrap; gap: 8px;
-  border-top: 1px solid var(--line); padding-top: 12px;
+  display: flex; flex-wrap: wrap; gap: 8px; flex-shrink: 0;
+  border-top: 1px solid var(--line); padding: 12px 16px; background: var(--panel);
 }
 .ot-preview-actions-bar .btn-danger { margin-left: auto; }
 
 @media (max-width: 1100px) {
   .ot-layout { grid-template-columns: minmax(260px, 340px) minmax(0, 1fr); }
   .ot-preview-facts-3 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .ot-preview-columns { grid-template-columns: 1fr; }
+  .ot-preview-col + .ot-preview-col { margin-top: 10px; }
+  .ot-list-controls { grid-template-columns: 1fr; }
 }
 
 /* Móvil: una columna; tarjetas compactas con N° + título + precio con estrellas */
 @media (max-width: 780px) {
-  .ot-layout { grid-template-columns: 1fr; }
-  .ot-preview { position: static; max-height: none; padding: 12px; }
+  .ot-layout { grid-template-columns: 1fr; grid-template-rows: none; }
+  .ot-list-panel, .ot-preview { border: 0; background: transparent; }
+  .ot-list-controls { padding: 0 0 10px; border-bottom: 0; }
+  .ot-grid { padding: 0; overflow: visible; }
+  .ot-preview { border: 1px solid var(--line); background: var(--panel); }
+  .ot-preview-body { overflow: visible; padding: 12px; }
+  .ot-preview-actions-bar { padding: 12px; }
   .ot-card { padding: 8px 10px; }
   .ot-card .ot-card-tags { display: none; }
   .ot-card-title { font-size: 12.5px; }
