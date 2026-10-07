@@ -1151,6 +1151,28 @@ td {
   padding: 10px; border-bottom: 1px solid var(--line); flex-shrink: 0;
 }
 .ot-list-controls .btn { min-width: 0; }
+.ot-group-row {
+  display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px;
+  padding: 10px 10px 8px; border-bottom: 1px solid var(--line); flex-shrink: 0;
+}
+.ot-group-btn {
+  --group-color: var(--line-strong);
+  display: flex; flex-direction: column; align-items: center; gap: 4px;
+  padding: 4px 2px; border: 0; background: transparent; color: var(--ink); cursor: pointer; min-width: 0;
+}
+.ot-group-btn.is-pending   { --group-color: #d97a1e; }
+.ot-group-btn.is-delivered { --group-color: #1f8a44; }
+.ot-group-btn.is-prototype { --group-color: var(--ink); }
+.ot-group-circle {
+  width: 40px; height: 40px; border-radius: 50% !important;
+  display: grid; place-items: center;
+  border: 2px solid var(--group-color); color: var(--group-color);
+  font-weight: 700; font-size: 15px; transition: background .15s, color .15s, box-shadow .15s;
+}
+.ot-group-label { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; text-align: center; line-height: 1.2; }
+.ot-group-btn:hover .ot-group-circle { box-shadow: 0 0 0 3px color-mix(in srgb, var(--group-color) 20%, transparent); }
+.ot-group-btn.active .ot-group-circle { background: var(--group-color); color: var(--panel); }
+.ot-group-btn.active .ot-group-label { font-weight: 700; }
 .ot-grid { display: flex; flex-direction: column; gap: 6px; min-width: 0; min-height: 0; padding: 10px; overflow-y: auto; }
 .ot-card {
   width: 100%; padding: 9px 12px;
@@ -2076,6 +2098,7 @@ body.footer-in-view .sync-badge {
   .ot-layout { grid-template-columns: 1fr; grid-template-rows: none; }
   .ot-list-panel, .ot-preview { border: 0; background: transparent; }
   .ot-list-controls { padding: 0 0 10px; border-bottom: 0; }
+  .ot-group-row { padding: 0 0 10px; border-bottom: 0; }
   .ot-grid { padding: 0; overflow: visible; }
   .ot-preview { border: 1px solid var(--line); background: var(--panel); }
   .ot-preview-body { overflow: visible; padding: 12px; }

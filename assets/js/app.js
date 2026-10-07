@@ -3858,6 +3858,12 @@ Objetivo
         render();
       }
 
+      if (action === 'set-order-group-priority') {
+        const group = actionBtn.dataset.group || '';
+        state.ui.orderGroupPriority = state.ui.orderGroupPriority === group ? '' : group;
+        render();
+      }
+
       if (action === 'toggle-order-sort') {
         state.ui.orderSortByNumber = !state.ui.orderSortByNumber;
         render();
@@ -9368,6 +9374,22 @@ Objetivo
     return normalized === 'entregada' || normalized === 'entregado';
   }
 
+  function isPrototypeOrder(order) {
+    return Boolean(order?.isPrototype || order?.quote?.isPrototype || order?.status === 'Prototipo');
+  }
+
+  // Grupos de los círculos del Panel OT: los prototipos no cuentan como entregados ni pendientes.
+  const ORDER_GROUPS = [
+    { key: 'pending', label: 'No entregados', className: 'is-pending' },
+    { key: 'delivered', label: 'Entregados', className: 'is-delivered' },
+    { key: 'prototype', label: 'Prototipos', className: 'is-prototype' }
+  ];
+
+  function getOrderGroup(order) {
+    if (isPrototypeOrder(order)) return 'prototype';
+    return isDeliveryCompleted(order.deliveryState || order.quote?.deliveryState) ? 'delivered' : 'pending';
+  }
+
   function getDeliveryMeta(deliveryState) {
     if (isDeliveryCompleted(deliveryState)) {
       return { className: 'delivery-done', label: 'Entregada', icon: iconSvg('trophy') };
@@ -10561,8 +10583,8 @@ Objetivo
     const visibleOrders = (state.orders || []).filter((item) => {
       const deliveryState = item.deliveryState || item.quote?.deliveryState || 'Abierta';
       if (filter === 'Todas') return true;
-      if (filter === 'En fabricación') return !isDeliveryCompleted(deliveryState);
-      if (filter === 'Entregadas') return isDeliveryCompleted(deliveryState);
+      if (filter === 'En fabricación') return !isPrototypeOrder(item) && !isDeliveryCompleted(deliveryState);
+      if (filter === 'Entregadas') return !isPrototypeOrder(item) && isDeliveryCompleted(deliveryState);
       return item.status === filter;
     });
 
@@ -10570,13 +10592,26 @@ Objetivo
     if (sortByOrderNumber) {
       visibleOrders.sort((a, b) => String(a.orderNumber || '').localeCompare(String(b.orderNumber || ''), undefined, { numeric: true, sensitivity: 'base' }));
     }
+    // El círculo seleccionado sube su grupo al inicio de la lista (sort estable: conserva el orden previo).
+    const groupPriority = ORDER_GROUPS.some((group) => group.key === state.ui.orderGroupPriority) ? state.ui.orderGroupPriority : '';
+    if (groupPriority) {
+      visibleOrders.sort((a, b) => Number(getOrderGroup(b) === groupPriority) - Number(getOrderGroup(a) === groupPriority));
+    }
+    const groupCounts = { pending: 0, delivered: 0, prototype: 0 };
+    (state.orders || []).forEach((order) => { groupCounts[getOrderGroup(order)] += 1; });
+    const groupCircles = ORDER_GROUPS.map((group) => `
+      <button type="button" class="ot-group-btn ${group.className} ${groupPriority === group.key ? 'active' : ''}" data-action="set-order-group-priority" data-group="${group.key}" aria-pressed="${groupPriority === group.key}" title="Mostrar primero: ${group.label}">
+        <span class="ot-group-circle">${groupCounts[group.key]}</span>
+        <span class="ot-group-label">${group.label}</span>
+      </button>
+    `).join('');
 
     const currentFilterLabel = ORDER_FILTER_OPTIONS.find((item) => item.key === filter)?.label || 'Todas';
 
     const cards = visibleOrders.map((order) => {
       const meta = getOrderStatusMeta(order.status || 'Prospecto');
       const deliveryState = order.deliveryState || order.quote?.deliveryState || 'Abierta';
-      const delivered = isDeliveryCompleted(deliveryState);
+      const delivered = !isPrototypeOrder(order) && isDeliveryCompleted(deliveryState);
       const marginAchievement = getMarginAchievement(order.quoteSummary || {});
       const titleRaw = String(order.orderTitle || 'Orden sin título');
       const hasInvoice = Boolean(getPrimaryAttachment(order, legacyOrderInvoiceAttachment));
@@ -10587,7 +10622,7 @@ Objetivo
             <strong class="ot-card-title" title="${sanitize(titleRaw)}">${sanitize(titleRaw)}</strong>
             <div class="ot-card-tags">
               ${renderOrderStatusPill(order.status || 'Prospecto')}
-              ${renderDeliveryPill(deliveryState)}
+              ${isPrototypeOrder(order) ? '' : renderDeliveryPill(deliveryState)}
               <span class="ot-invoice-flag ${hasInvoice ? 'is-ok' : 'is-missing'}" title="${hasInvoice ? 'Boleta/factura adjunta' : 'Sin boleta/factura'}">${hasInvoice ? '✓ Boleta' : '⚠ Sin boleta'}</span>
             </div>
           </div>
@@ -10669,7 +10704,7 @@ Objetivo
         <div class="ot-preview-section">
           <div class="ot-preview-section-title">Entrega y boleta</div>
           <div class="ot-preview-status-row">
-            <div><div class="small ot-invoice-title">Estado de entrega</div><div class="ot-preview-toggle-wrap">${renderDeliveryToggle(selectedDeliveryState, selectedOrder.id)}</div></div>
+            ${isPrototypeOrder(selectedOrder) ? '' : `<div><div class="small ot-invoice-title">Estado de entrega</div><div class="ot-preview-toggle-wrap">${renderDeliveryToggle(selectedDeliveryState, selectedOrder.id)}</div></div>`}
             ${renderOrderInvoiceActions(selectedOrder)}
           </div>
         </div>
@@ -10710,6 +10745,7 @@ Objetivo
 
         <div class="ot-layout">
           <div class="ot-list-panel">
+            <div class="ot-group-row">${groupCircles}</div>
             <div class="ot-list-controls">
               <button type="button" class="btn btn-soft picker-trigger-btn" data-action="open-order-filter-picker" title="Filtrar OT por categoría">
                 <span class="picker-trigger-label">Categoría: ${sanitize(currentFilterLabel)}</span>
