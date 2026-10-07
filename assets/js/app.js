@@ -203,7 +203,8 @@ Objetivo
       sun: '☼',        // ☼  tema claro
       lock: '■',       // ■  bloqueado
       unlock: '□',     // □  desbloqueado
-      calculator: '▦'  // ▦  calculadora
+      calculator: '▦', // ▦  calculadora
+      photo: '▣'       // ▣  foto
     };
     const icon = iconByName[name] || iconByName.plus;
     const variantClass = name === 'eyeClosed' ? 'ui-icon-eye-closed' : '';
@@ -3858,6 +3859,54 @@ Objetivo
         render();
       }
 
+      if (action === 'pick-order-photo') {
+        const input = document.getElementById(`order-photo-input-${actionBtn.dataset.orderId || ''}`);
+        if (input) input.click();
+        return;
+      }
+
+      if (action === 'clear-order-photo') {
+        const order = findOrderById(actionBtn.dataset.orderId || '');
+        if (!order?.quote?.productImage) return;
+        if (!window.confirm('¿Quitar la foto del producto de esta OT?')) return;
+        order.quote.productImage = null;
+        stampBaseUpdate('orders');
+        render();
+        return;
+      }
+
+      if (action === 'view-order-photo') {
+        const order = findOrderById(actionBtn.dataset.orderId || '');
+        const image = getOrderProductImage(order);
+        if (!image) return;
+        openPickerModal(`Foto · ${order.orderNumber || 'OT'}`, `<div class="ot-photo-modal">${renderOrderProductMedia(image, 'ot-photo-modal-media')}</div>`);
+        return;
+      }
+
+      if (action === 'add-order-tab') {
+        const orderId = actionBtn.dataset.id || '';
+        if (!orderId) return;
+        const tabs = Array.isArray(state.ui.orderTabs) ? state.ui.orderTabs : [];
+        if (!tabs.some((id) => idsEqual(id, orderId))) tabs.push(orderId);
+        state.ui.orderTabs = tabs;
+        state.ui.selectedOrderId = orderId;
+        render();
+        return;
+      }
+
+      if (action === 'select-order-tab') {
+        state.ui.selectedOrderId = actionBtn.dataset.id || null;
+        render();
+        return;
+      }
+
+      if (action === 'close-order-tab') {
+        const orderId = actionBtn.dataset.id || '';
+        state.ui.orderTabs = (state.ui.orderTabs || []).filter((id) => !idsEqual(id, orderId));
+        render();
+        return;
+      }
+
       if (action === 'set-order-group-priority') {
         const group = actionBtn.dataset.group || '';
         state.ui.orderGroupPriority = state.ui.orderGroupPriority === group ? '' : group;
@@ -5043,6 +5092,43 @@ Objetivo
         await recoverDesktopAttachments(files);
       }
       event.target.value = '';
+    });
+
+    document.addEventListener('change', async (event) => {
+      const target = event.target;
+      if (!target?.dataset?.orderPhoto) return;
+      const file = target.files?.[0];
+      const order = findOrderById(target.dataset.orderId || '');
+      target.value = '';
+      if (!file || !order) return;
+      const type = String(file.type || '');
+      if (!type.startsWith('image/') && type !== 'video/webm') {
+        window.alert('Solo se permiten imágenes (WebP, JPG, PNG) o video WebM para la foto del producto.');
+        return;
+      }
+      try {
+        const { dataUrl, mimeType } = await readOrderProductImage(file);
+        const sizeKb = Math.round((dataUrl.length * 3) / 4 / 1024);
+        if (sizeKb > 4 * 1024) {
+          window.alert('La foto supera el límite de 4 MB. Usa un archivo más liviano.');
+          return;
+        }
+        if (!order.quote) order.quote = {};
+        order.quote.productImage = { dataUrl, mimeType, fileName: file.name || 'foto', sizeKb };
+        stampBaseUpdate('orders');
+        render();
+      } catch (error) {
+        console.error(error);
+        window.alert('No se pudo cargar la foto del producto.');
+      }
+    });
+
+    document.addEventListener('keydown', (event) => {
+      // Las tarjetas OT son <div role="button"> (contienen el botón "+"); Enter/Espacio las abre.
+      const card = event.target?.closest?.('.ot-card[role="button"]');
+      if (!card || event.target !== card || (event.key !== 'Enter' && event.key !== ' ')) return;
+      event.preventDefault();
+      card.click();
     });
 
     document.addEventListener('change', async (event) => {
@@ -9390,6 +9476,64 @@ Objetivo
     return isDeliveryCompleted(order.deliveryState || order.quote?.deliveryState) ? 'delivered' : 'pending';
   }
 
+  // Foto del producto: vive en order.quote para viajar con editar/duplicar/exportar/importar.
+  function getOrderProductImage(order) {
+    const image = order?.quote?.productImage;
+    return image?.dataUrl ? image : null;
+  }
+
+  function renderOrderProductMedia(image, className) {
+    if (!image) return '';
+    return String(image.mimeType || '').startsWith('video/')
+      ? `<video class="${className}" src="${image.dataUrl}" muted autoplay loop playsinline></video>`
+      : `<img class="${className}" src="${image.dataUrl}" alt="Foto del producto" loading="lazy" />`;
+  }
+
+  // Las imágenes se re-codifican a WebP (máx. 1200 px) para que pesen poco; los videos WebM se guardan tal cual.
+  async function readOrderProductImage(file) {
+    const original = await readFileAsDataUrl(file);
+    const mimeType = String(file.type || '');
+    if (!mimeType.startsWith('image/') || mimeType === 'image/gif' || mimeType === 'image/svg+xml') {
+      return { dataUrl: original, mimeType: mimeType || 'application/octet-stream' };
+    }
+    try {
+      const img = await new Promise((resolve, reject) => {
+        const el = new Image();
+        el.onload = () => resolve(el);
+        el.onerror = reject;
+        el.src = original;
+      });
+      const scale = Math.min(1, 1200 / Math.max(img.naturalWidth || 1, img.naturalHeight || 1));
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.max(1, Math.round(img.naturalWidth * scale));
+      canvas.height = Math.max(1, Math.round(img.naturalHeight * scale));
+      canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+      const webp = canvas.toDataURL('image/webp', 0.82);
+      if (webp.startsWith('data:image/webp') && webp.length < original.length) return { dataUrl: webp, mimeType: 'image/webp' };
+    } catch (error) {
+      console.warn('No se pudo optimizar la foto; se guarda el archivo original.', error);
+    }
+    return { dataUrl: original, mimeType };
+  }
+
+  function renderOrderPhotoActions(order) {
+    const orderId = order?.id || '';
+    const image = getOrderProductImage(order);
+    return `
+      <div class="ot-invoice-block">
+        <div class="small ot-invoice-title">Foto del producto</div>
+        <div class="ot-invoice-actions">
+          <button class="btn btn-soft btn-icon" data-action="pick-order-photo" data-order-id="${orderId}" title="Subir foto del producto" aria-label="Subir foto del producto">${iconSvg('photo')}</button>
+          <input id="order-photo-input-${orderId}" class="expense-file-hidden-input" type="file" accept="image/*,video/webm,.webp,.webm" data-order-photo="true" data-order-id="${orderId}" />
+          ${image
+    ? `<button class="btn btn-soft btn-icon" data-action="clear-order-photo" data-order-id="${orderId}" title="Quitar foto" aria-label="Quitar foto">${iconSvg('close')}</button>`
+    : `<span class="expense-file-icon clear is-disabled" title="Sin foto" aria-disabled="true">${iconSvg('close')}</span>`}
+        </div>
+        <div class="small expense-file-name ot-invoice-file-name">${image ? `${sanitize(image.fileName || 'foto')} (${Number(image.sizeKb || 0)} KB)` : 'Sin foto'}</div>
+      </div>
+    `;
+  }
+
   function getDeliveryMeta(deliveryState) {
     if (isDeliveryCompleted(deliveryState)) {
       return { className: 'delivery-done', label: 'Entregada', icon: iconSvg('trophy') };
@@ -10608,6 +10752,26 @@ Objetivo
 
     const currentFilterLabel = ORDER_FILTER_OPTIONS.find((item) => item.key === filter)?.label || 'Todas';
 
+    // Pestañas de OT "a la mano" (solo UI local). Se limpian las de OT borradas.
+    const tabOrders = (Array.isArray(state.ui.orderTabs) ? state.ui.orderTabs : [])
+      .map((id) => findOrderById(id))
+      .filter(Boolean);
+    if (tabOrders.length !== (state.ui.orderTabs || []).length) state.ui.orderTabs = tabOrders.map((order) => order.id);
+    const isInTabs = (order) => tabOrders.some((item) => idsEqual(item.id, order.id));
+    const orderTabsBar = tabOrders.length ? `
+      <div class="ot-tabs" role="tablist">
+        ${tabOrders.map((order) => `
+          <div class="ot-tab ${idsEqual(selectedOrder?.id, order.id) ? 'active' : ''}" role="tab" aria-selected="${idsEqual(selectedOrder?.id, order.id)}">
+            <button type="button" class="ot-tab-select" data-action="select-order-tab" data-id="${order.id}" title="${sanitize(order.orderTitle || '')}">
+              <strong>${sanitize(order.orderNumber || '-')}</strong>
+              <span>${sanitize(order.orderTitle || 'Orden sin título')}</span>
+            </button>
+            <button type="button" class="ot-tab-close" data-action="close-order-tab" data-id="${order.id}" title="Cerrar pestaña" aria-label="Cerrar pestaña">×</button>
+          </div>
+        `).join('')}
+      </div>
+    ` : '';
+
     const cards = visibleOrders.map((order) => {
       const meta = getOrderStatusMeta(order.status || 'Prospecto');
       const deliveryState = order.deliveryState || order.quote?.deliveryState || 'Abierta';
@@ -10615,10 +10779,16 @@ Objetivo
       const marginAchievement = getMarginAchievement(order.quoteSummary || {});
       const titleRaw = String(order.orderTitle || 'Orden sin título');
       const hasInvoice = Boolean(getPrimaryAttachment(order, legacyOrderInvoiceAttachment));
+      const productImage = getOrderProductImage(order);
+      const inTabs = isInTabs(order);
       return `
-        <button type="button" class="ot-card ${meta.className} ${delivered ? 'is-delivered' : ''} ${idsEqual(selectedOrder?.id, order.id) ? 'selected' : ''}" data-action="open-order-card" data-id="${order.id}">
+        <div class="ot-card ${meta.className} ${delivered ? 'is-delivered' : ''} ${idsEqual(selectedOrder?.id, order.id) ? 'selected' : ''}" role="button" tabindex="0" data-action="open-order-card" data-id="${order.id}">
+          ${productImage ? `<span class="ot-card-thumb">${renderOrderProductMedia(productImage, 'ot-card-thumb-media')}</span>` : ''}
           <div class="ot-card-body">
-            <div class="small ot-card-number">${sanitize(order.orderNumber || '-')}</div>
+            <div class="ot-card-number-row">
+              <button type="button" class="ot-tab-add-btn ${inTabs ? 'is-added' : ''}" data-action="add-order-tab" data-id="${order.id}" title="${inTabs ? 'Ya está en pestañas' : 'Agregar a pestañas'}" aria-label="${inTabs ? 'Ya está en pestañas' : 'Agregar a pestañas'}">${inTabs ? '✓' : '+'}</button>
+              <span class="small ot-card-number">${sanitize(order.orderNumber || '-')}</span>
+            </div>
             <strong class="ot-card-title" title="${sanitize(titleRaw)}">${sanitize(titleRaw)}</strong>
             <div class="ot-card-tags">
               ${renderOrderStatusPill(order.status || 'Prospecto')}
@@ -10630,7 +10800,7 @@ Objetivo
             <div class="ot-card-price">${formatCurrency(order.quoteSummary?.effectiveGross || order.priceGross || 0)}</div>
             <div class="ot-card-achievement ${marginAchievement.tone}" title="${sanitize(marginAchievement.label)}">${marginAchievement.iconMarkup}</div>
           </div>
-        </button>
+        </div>
       `;
     }).join('');
 
@@ -10646,6 +10816,7 @@ Objetivo
       const net = Number(sum.effectiveNet || 0);
       const contribution = Number(sum.contribution || 0);
       const deliveryDate = selectedOrder.estimatedDeliveryDate || selectedOrder.quote?.estimatedDeliveryDate || '-';
+      const selectedImage = getOrderProductImage(selectedOrder);
       const linkedEntries = (state.finance?.entries || []).filter(
         (e) => e.category === 'Ventas' && e.orderId && idsEqual(e.orderId, selectedOrder.id)
       ).sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')));
@@ -10663,11 +10834,16 @@ Objetivo
       return `
         <div class="ot-preview-body">
         <div class="ot-preview-head">
+          ${selectedImage
+    ? `<button type="button" class="ot-preview-photo" data-action="view-order-photo" data-order-id="${selectedOrder.id}" title="Ver foto">${renderOrderProductMedia(selectedImage, 'ot-preview-photo-media')}</button>`
+    : '<div class="ot-preview-photo is-empty" title="Sin foto del producto" aria-label="Sin foto del producto"></div>'}
+          <div class="ot-preview-head-text">
           <div class="ot-preview-number">${sanitize(selectedOrder.orderNumber || '-')}</div>
           <h3 class="ot-preview-title">${sanitize(selectedOrder.orderTitle || 'Orden sin título')}</h3>
           <div class="ot-card-tags">
             ${renderOrderStatusPill(selectedOrder.status || 'Prospecto')}
             <span class="achievement-pill ${selectedAchievement.tone}" title="${sanitize(selectedAchievement.label)}">${selectedAchievement.iconMarkup} ${sanitize(selectedAchievement.label)}</span>
+          </div>
           </div>
         </div>
 
@@ -10702,10 +10878,11 @@ Objetivo
         </div>
         <div class="ot-preview-col">
         <div class="ot-preview-section">
-          <div class="ot-preview-section-title">Entrega y boleta</div>
+          <div class="ot-preview-section-title">Entrega, boleta y foto</div>
           <div class="ot-preview-status-row">
             ${isPrototypeOrder(selectedOrder) ? '' : `<div><div class="small ot-invoice-title">Estado de entrega</div><div class="ot-preview-toggle-wrap">${renderDeliveryToggle(selectedDeliveryState, selectedOrder.id)}</div></div>`}
             ${renderOrderInvoiceActions(selectedOrder)}
+            ${renderOrderPhotoActions(selectedOrder)}
           </div>
         </div>
 
@@ -10757,7 +10934,7 @@ Objetivo
               ${cards || '<div class="empty-state">Todavía no hay órdenes guardadas en el sistema. Importa la Base OT desde la Central de Descargas.</div>'}
             </div>
           </div>
-          ${selectedOrder || cards ? `<aside class="ot-preview">${renderPreview()}</aside>` : ''}
+          ${selectedOrder || cards ? `<aside class="ot-preview">${orderTabsBar}${renderPreview()}</aside>` : ''}
         </div>
       </div>
     `;

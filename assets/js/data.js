@@ -70,6 +70,7 @@ window.ERMDefaults = (() => {
       orderFilter: 'Todas',
       orderSortByNumber: false,
       orderGroupPriority: '',
+      orderTabs: [],
       activityLog: [],
       scenarioLocked: false,
       lastScenarioSavedAt: null,

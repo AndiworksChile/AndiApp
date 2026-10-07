@@ -1186,6 +1186,22 @@ td {
 .ot-card.selected { outline: 2px solid var(--accent); outline-offset: -1px; }
 .ot-card-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
 .ot-card-number { font-size: 11px; font-weight: 700; letter-spacing: 0.02em; }
+.ot-card:focus-visible { outline: 2px solid var(--accent); outline-offset: -1px; }
+.ot-card-number-row { display: flex; align-items: center; gap: 6px; }
+.ot-tab-add-btn {
+  width: 18px; height: 18px; padding: 0; border-radius: 50% !important; flex-shrink: 0;
+  display: inline-grid; place-items: center;
+  border: 1px solid #111; background: #111; color: #fff;
+  font-size: 13px; font-weight: 700; line-height: 1; cursor: pointer;
+}
+.ot-tab-add-btn:hover { transform: scale(1.12); }
+.ot-tab-add-btn.is-added { background: transparent; color: var(--ink); border-color: var(--ink); font-size: 10px; }
+body.theme-dark .ot-tab-add-btn:not(.is-added) { border-color: var(--line-strong); }
+.ot-card-thumb {
+  width: 48px; height: 48px; flex-shrink: 0; overflow: hidden;
+  border: 1px solid var(--line); background: var(--field);
+}
+.ot-card-thumb-media { width: 100%; height: 100%; object-fit: cover; display: block; }
 .ot-card-title {
   display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   font-size: 13px; line-height: 1.25; font-weight: 700; text-transform: uppercase;
@@ -2055,6 +2071,44 @@ body.footer-in-view .sync-badge {
 .ot-preview > .empty-state { padding: 16px; }
 .ot-preview-columns { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 22px; }
 .ot-preview-col { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.ot-preview-head { display: flex; gap: 14px; align-items: flex-start; }
+.ot-preview-head-text { flex: 1; min-width: 0; }
+.ot-preview-photo {
+  width: 104px; height: 104px; flex-shrink: 0; padding: 0; overflow: hidden;
+  border: 1px solid var(--line); background: var(--field); position: relative; cursor: zoom-in;
+}
+.ot-preview-photo-media { width: 100%; height: 100%; object-fit: cover; display: block; }
+.ot-preview-photo.is-empty { cursor: default; }
+.ot-preview-photo.is-empty::before,
+.ot-preview-photo.is-empty::after {
+  content: ''; position: absolute; left: 50%; top: 50%; width: 138%; height: 1px;
+  background: var(--line); transform-origin: center;
+}
+.ot-preview-photo.is-empty::before { transform: translate(-50%, -50%) rotate(45deg); }
+.ot-preview-photo.is-empty::after  { transform: translate(-50%, -50%) rotate(-45deg); }
+.ot-photo-modal { display: grid; place-items: center; padding: 6px; }
+.ot-photo-modal-media { max-width: 100%; max-height: 70vh; object-fit: contain; display: block; }
+.ot-tabs {
+  display: flex; gap: 0; overflow-x: auto; flex-shrink: 0;
+  border-bottom: 1px solid var(--line); background: var(--panel-soft);
+}
+.ot-tab {
+  display: flex; align-items: stretch; flex-shrink: 0; max-width: 220px;
+  border-right: 1px solid var(--line); border-top: 3px solid transparent;
+}
+.ot-tab.active { background: var(--panel); border-top-color: var(--accent); }
+.ot-tab-select {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 1px; min-width: 0;
+  padding: 6px 4px 6px 10px; border: 0; background: transparent; color: var(--ink); cursor: pointer; text-align: left;
+}
+.ot-tab-select strong { font-size: 11px; letter-spacing: 0.02em; }
+.ot-tab-select span { font-size: 11px; color: var(--muted); max-width: 160px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ot-tab:not(.active) .ot-tab-select strong { color: var(--muted); }
+.ot-tab-close {
+  border: 0; background: transparent; color: var(--muted); cursor: pointer;
+  padding: 0 9px; font-size: 15px; line-height: 1;
+}
+.ot-tab-close:hover { color: var(--warn); }
 .ot-preview-number { font-size: 12px; font-weight: 700; color: var(--muted); letter-spacing: 0.04em; }
 .ot-preview-title { margin: 2px 0 6px; font-size: 17px; line-height: 1.25; text-transform: uppercase; letter-spacing: 0.04em; }
 .ot-preview-section { border-top: 1px solid var(--line); padding-top: 10px; }
@@ -2099,6 +2153,8 @@ body.footer-in-view .sync-badge {
   .ot-list-panel, .ot-preview { border: 0; background: transparent; }
   .ot-list-controls { padding: 0 0 10px; border-bottom: 0; }
   .ot-group-row { padding: 0 0 10px; border-bottom: 0; }
+  .ot-preview-photo { width: 76px; height: 76px; }
+  .ot-card-thumb { width: 40px; height: 40px; }
   .ot-grid { padding: 0; overflow: visible; }
   .ot-preview { border: 1px solid var(--line); background: var(--panel); }
   .ot-preview-body { overflow: visible; padding: 12px; }
