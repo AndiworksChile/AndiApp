@@ -2167,3 +2167,23 @@ body.footer-in-view .sync-badge {
   .ot-preview-facts-3 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .ot-preview-actions-bar .btn { flex: 1 1 auto; }
 }
+
+/* ─── SUMAR OT (Base de datos) ─── */
+.picker-modal-card:has(.ot-merge) { width: min(640px, calc(100vw - 20px)); }
+.ot-merge { display: flex; flex-direction: column; gap: 10px; }
+.ot-merge-list { display: flex; flex-direction: column; gap: 6px; }
+.ot-merge-row { display: grid; grid-template-columns: auto 1fr 150px; gap: 10px; align-items: start; padding: 8px 10px; border: 1px solid var(--line); background: var(--panel); }
+.ot-merge-row.is-conflict { border-left: 3px solid #d97a1e; }
+.ot-merge-check { margin-top: 3px; }
+.ot-merge-info { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.ot-merge-info strong { overflow-wrap: anywhere; }
+.ot-merge-note { font-size: 12px; color: #d97a1e; }
+.ot-merge-number { display: flex; flex-direction: column; gap: 2px; }
+.ot-merge-number input { width: 100%; }
+.ot-merge-status { color: #1f8a44; }
+.ot-merge-status.is-error { color: #c0392b; }
+.ot-merge-actions { justify-content: flex-end; }
+@media (max-width: 780px) {
+  .ot-merge-row { grid-template-columns: auto 1fr; }
+  .ot-merge-number { grid-column: 2; }
+}

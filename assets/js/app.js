@@ -2864,6 +2864,7 @@ Objetivo
     refs.externalResourcesImportInput = document.getElementById('external-resources-import-input');
     refs.contactImportInput = document.getElementById('contacts-import-input');
     refs.orderImportInput = document.getElementById('order-import-input');
+    refs.orderMergeInput = document.getElementById('order-merge-input');
     refs.expenseImportInput = document.getElementById('expense-import-input');
     refs.desiredImportInput = document.getElementById('desired-import-input');
     refs.attendanceImportInput = document.getElementById('attendance-import-input');
@@ -3600,6 +3601,16 @@ Objetivo
 
       if (action === 'close-picker-modal') {
         closePickerModal();
+        return;
+      }
+
+      if (action === 'open-order-merge') {
+        refs.orderMergeInput?.click();
+        return;
+      }
+
+      if (action === 'confirm-order-merge') {
+        confirmOrderMerge();
         return;
       }
 
@@ -5044,6 +5055,22 @@ Objetivo
         await importOrdersFromFiles([file]);
       }
       event.target.value = '';
+    });
+
+    refs.orderMergeInput?.addEventListener('change', async (event) => {
+      const files = Array.from(event.target.files || []);
+      if (files.length) {
+        await openOrderMergeFromFiles(files);
+      }
+      event.target.value = '';
+    });
+
+    refs.pickerModalList?.addEventListener('input', (event) => {
+      if (event.target.closest('[data-merge-number]')) validateOrderMergeRows();
+    });
+
+    refs.pickerModalList?.addEventListener('change', (event) => {
+      if (event.target.closest('[data-merge-include]')) validateOrderMergeRows();
     });
 
     refs.expenseImportInput?.addEventListener('change', async (event) => {
@@ -6885,6 +6912,227 @@ Objetivo
 
   async function importOrderFromFile(file) {
     await importOrdersFromFiles([file]);
+  }
+
+  // Sumar OT (Base de datos): agrega OT desde archivos JSON (OT individual o Base OT)
+  // sin reemplazar las existentes. Si el número coincide, se propone el siguiente disponible.
+  let pendingOrderMerge = [];
+
+  function getOrderNumberKey(value) {
+    const text = String(value || '').trim().toUpperCase();
+    const match = text.match(/(\d+)/);
+    return match ? `#${Number(match[1])}` : text;
+  }
+
+  function getOrderNumberValue(value) {
+    const match = String(value || '').match(/(\d+)/);
+    return match ? Number(match[1]) : 0;
+  }
+
+  function collectOrderMergeEntries(parsed) {
+    if (Array.isArray(parsed?.orders)) {
+      return parsed.orders.map((raw) => ({
+        raw,
+        quote: raw.quote || raw.order || raw,
+        quoteSummary: raw.quoteSummary || {},
+        scenarioSnapshot: raw.scenarioSnapshot || {}
+      }));
+    }
+    if (parsed?.order) {
+      return [{ raw: parsed.order, quote: parsed.order, quoteSummary: parsed.quoteSummary || {}, scenarioSnapshot: parsed.scenarioSnapshot || {} }];
+    }
+    return [];
+  }
+
+  async function openOrderMergeFromFiles(files) {
+    const entries = [];
+    let failed = 0;
+    for (const file of files) {
+      try {
+        const found = collectOrderMergeEntries(JSON.parse(await file.text()));
+        if (!found.length) failed += 1;
+        entries.push(...found);
+      } catch (error) {
+        console.error(error);
+        failed += 1;
+      }
+    }
+
+    if (!entries.length) {
+      window.alert('No se encontraron OT en el archivo. Usa un JSON exportado desde el Presupuestador (OT individual) o la Base OT.');
+      return;
+    }
+
+    const existingByKey = new Map();
+    (state.orders || []).forEach((order) => {
+      if (isPrototypeOrder(order)) return;
+      const key = getOrderNumberKey(order.orderNumber);
+      if (key && !existingByKey.has(key)) existingByKey.set(key, order);
+    });
+
+    const usedKeys = new Set(existingByKey.keys());
+    const rows = entries.map((entry) => {
+      const { raw, quote } = entry;
+      const isPrototype = Boolean(raw.isPrototype || quote.isPrototype || raw.status === 'Prototipo' || quote.status === 'Prototipo');
+      const originalNumber = String(raw.orderNumber || quote.orderNumber || '').trim();
+      const row = {
+        ...entry,
+        isPrototype,
+        originalNumber,
+        orderTitle: raw.orderTitle || quote.orderTitle || 'Orden importada',
+        customerName: raw.customerName || quote.customerName || '',
+        conflictWith: null,
+        duplicateInFile: false,
+        number: isPrototype ? 'Prototipo' : originalNumber
+      };
+      if (isPrototype) return row;
+      const key = getOrderNumberKey(originalNumber);
+      if (!originalNumber) return row;
+      if (existingByKey.has(key)) row.conflictWith = existingByKey.get(key);
+      else if (usedKeys.has(key)) row.duplicateInFile = true;
+      else usedKeys.add(key);
+      return row;
+    });
+
+    let maxNumber = [...usedKeys].reduce((acc, key) => Math.max(acc, key.startsWith('#') ? Number(key.slice(1)) : 0), 0);
+    rows.forEach((row) => {
+      if (row.isPrototype || (row.originalNumber && !row.conflictWith && !row.duplicateInFile)) return;
+      maxNumber += 1;
+      row.number = `OT-${String(maxNumber).padStart(3, '0')}`;
+    });
+
+    pendingOrderMerge = rows;
+    openPickerModal(`Sumar OT · ${rows.length} encontrada${rows.length === 1 ? '' : 's'}`, renderOrderMergeModal(rows, failed));
+    validateOrderMergeRows();
+  }
+
+  function renderOrderMergeModal(rows, failed) {
+    const conflicts = rows.filter((row) => row.conflictWith || row.duplicateInFile || (!row.isPrototype && !row.originalNumber)).length;
+    const rowsHtml = rows.map((row, index) => {
+      let note = '';
+      if (row.conflictWith) note = `Coincide con ${sanitize(row.conflictWith.orderNumber || '')} · ${sanitize(row.conflictWith.orderTitle || 'OT existente')}. Número sugerido: ${sanitize(row.number)}.`;
+      else if (row.duplicateInFile) note = `El número ${sanitize(row.originalNumber)} se repite en el archivo. Número sugerido: ${sanitize(row.number)}.`;
+      else if (!row.isPrototype && !row.originalNumber) note = `Venía sin número. Número sugerido: ${sanitize(row.number)}.`;
+      return `
+        <div class="ot-merge-row ${note ? 'is-conflict' : ''}">
+          <input type="checkbox" class="ot-merge-check" data-merge-include="${index}" checked aria-label="Sumar esta OT" />
+          <div class="ot-merge-info">
+            <strong>${sanitize(row.orderTitle)}</strong>
+            <span class="small">${sanitize(row.customerName || 'Sin cliente')}${row.originalNumber && !row.isPrototype ? ` · N° original ${sanitize(row.originalNumber)}` : ''}</span>
+            ${note ? `<span class="ot-merge-note">${note}</span>` : ''}
+          </div>
+          <div class="ot-merge-number">
+            <input data-merge-number="${index}" value="${sanitize(row.number)}" ${row.isPrototype ? 'disabled' : ''} aria-label="Número de OT" />
+            <span class="ot-merge-status small" data-merge-status="${index}"></span>
+          </div>
+        </div>
+      `;
+    }).join('');
+
+    return `
+      <div class="ot-merge">
+        <p class="small">${conflicts ? `${conflicts} OT con número repetido o faltante: se propone el siguiente número disponible y puedes cambiarlo.` : 'Ningún número coincide con las OT existentes.'} Las OT actuales no se modifican.${failed ? ` ${failed} archivo(s) no se pudieron leer.` : ''}</p>
+        <div class="ot-merge-list">${rowsHtml}</div>
+        <div class="button-group ot-merge-actions">
+          <button type="button" class="btn btn-soft" data-action="close-picker-modal">Cancelar</button>
+          <button type="button" class="btn btn-primary" data-action="confirm-order-merge" data-merge-confirm>Sumar OT</button>
+        </div>
+      </div>
+    `;
+  }
+
+  function readOrderMergeSelection() {
+    const list = refs.pickerModalList;
+    if (!list) return [];
+    return pendingOrderMerge.map((row, index) => ({
+      row,
+      include: Boolean(list.querySelector(`[data-merge-include="${index}"]`)?.checked),
+      number: row.isPrototype ? 'Prototipo' : String(list.querySelector(`[data-merge-number="${index}"]`)?.value || '').trim()
+    }));
+  }
+
+  function validateOrderMergeRows() {
+    const list = refs.pickerModalList;
+    if (!list || !pendingOrderMerge.length) return false;
+    const selection = readOrderMergeSelection();
+    const existingKeys = new Set((state.orders || []).filter((order) => !isPrototypeOrder(order)).map((order) => getOrderNumberKey(order.orderNumber)));
+    const keyCount = new Map();
+    selection.forEach((item) => {
+      if (!item.include || item.row.isPrototype || !item.number) return;
+      const key = getOrderNumberKey(item.number);
+      keyCount.set(key, (keyCount.get(key) || 0) + 1);
+    });
+
+    let errors = 0;
+    let included = 0;
+    selection.forEach((item, index) => {
+      const status = list.querySelector(`[data-merge-status="${index}"]`);
+      let message = '';
+      if (item.include) {
+        included += 1;
+        if (!item.row.isPrototype) {
+          const key = getOrderNumberKey(item.number);
+          if (!item.number) message = 'Falta el número';
+          else if (existingKeys.has(key)) message = 'Ya existe en el Panel OT';
+          else if (keyCount.get(key) > 1) message = 'Repetido en esta importación';
+        }
+      }
+      if (message) errors += 1;
+      if (status) {
+        status.textContent = item.include ? (message || 'Disponible') : 'No se suma';
+        status.classList.toggle('is-error', Boolean(message));
+      }
+    });
+
+    const confirmBtn = list.querySelector('[data-merge-confirm]');
+    if (confirmBtn) {
+      confirmBtn.disabled = Boolean(errors) || !included;
+      confirmBtn.textContent = included ? `Sumar ${included} OT` : 'Sumar OT';
+    }
+    return !errors && included > 0;
+  }
+
+  function confirmOrderMerge() {
+    if (!validateOrderMergeRows()) return;
+    const selection = readOrderMergeSelection().filter((item) => item.include);
+    const added = [];
+    selection.forEach(({ row, number }) => {
+      const { raw, quote } = row;
+      const pick = (field) => raw[field] || quote[field];
+      const record = {
+        id: uid('ot'),
+        orderNumber: number,
+        orderTitle: row.orderTitle,
+        productName: pick('productName') || '',
+        customerId: pick('customerId') || '',
+        customerName: row.customerName,
+        quoteDate: pick('quoteDate') || new Date().toISOString().slice(0, 10),
+        estimatedDeliveryDate: pick('estimatedDeliveryDate') || '',
+        status: pick('status') || 'Prospecto',
+        deliveryState: pick('deliveryState') || 'Abierta',
+        isPrototype: row.isPrototype,
+        savedAt: new Date().toISOString(),
+        attachments: normalizeAttachments(raw.attachments || quote.attachments || []),
+        invoicePdfDataUrl: pick('invoicePdfDataUrl') || '',
+        invoicePdfName: pick('invoicePdfName') || '',
+        invoicePdfMimeType: pick('invoicePdfMimeType') || '',
+        invoicePdfSizeKb: Number(pick('invoicePdfSizeKb') || 0) || 0,
+        quote: { ...quote, orderNumber: number },
+        quoteSummary: row.quoteSummary || {},
+        scenarioSnapshot: row.scenarioSnapshot || {}
+      };
+      added.push(record);
+    });
+
+    state.orders = [...added, ...(state.orders || [])];
+    pendingOrderMerge = [];
+    closePickerModal();
+    state.ui.selectedOrderId = added[0]?.id || state.ui.selectedOrderId;
+    state.ui.orderFilter = 'Todas';
+    state.currentView = 'orders';
+    stampBaseUpdate('orders');
+    render();
+    window.alert(`Se sumaron ${added.length} OT al Panel OT.`);
   }
 
   // Crea una OT nueva a partir de otra: mismo contenido y cálculo, nuevo nombre y número,
@@ -13004,6 +13252,7 @@ Objetivo
             <h2>Módulo 3 · Base de datos</h2>
             <p class="subtitle">Administra tu base principal y sus subbases conectadas al presupuestador.</p>
           </div>
+          <button class="btn btn-primary" data-action="open-order-merge" title="Sumar OT desde un archivo JSON">+ Sumar OT</button>
         </div>
         <div class="filter-row">
           ${sections.map((section) => `<button class="btn filter-chip ${state.ui.databaseSection === section.key ? 'active' : ''}" data-action="set-database-section" data-section="${section.key}">${section.label}</button>`).join('')}
@@ -13470,6 +13719,7 @@ Objetivo
           <button type="button" class="btn mobile-home-btn" data-action="db-open-view" data-view-key="table"><span>Base de datos de insumos</span></button>
           <button type="button" class="btn mobile-home-btn" data-action="db-open-view" data-view-key="productTypes"><span>Tipos de producto</span></button>
           <button type="button" class="btn mobile-home-btn" data-action="db-open-view" data-view-key="providers"><span>Proveedores</span></button>
+          <button type="button" class="btn mobile-home-btn" data-action="open-order-merge"><span>Sumar OT</span></button>
         </div>
       </div>`;
   }
