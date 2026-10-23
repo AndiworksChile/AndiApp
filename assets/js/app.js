@@ -2885,6 +2885,7 @@ Objetivo
     refs.pickerModalTitle = document.getElementById('picker-modal-title');
     refs.pickerModalList = document.getElementById('picker-modal-list');
     refs.activityLogWidget = document.getElementById('activity-log-widget');
+    refs.newMenu = document.getElementById('new-menu');
     refs.activityLogLatest = document.getElementById('activity-log-latest');
     refs.activityLogList = document.getElementById('activity-log-list');
     refs.calculatorModal = document.getElementById('calculator-modal');
@@ -3023,6 +3024,12 @@ Objetivo
     });
 
     document.addEventListener('click', async (event) => {
+      if (event.target.closest('[data-action="toggle-new-menu"]')) {
+        setNewMenuOpen(refs.newMenu?.classList.contains('is-hidden'));
+        return;
+      }
+      if (refs.newMenu && !refs.newMenu.classList.contains('is-hidden')) setNewMenuOpen(false);
+
       const viewBtn = event.target.closest('[data-view]');
       if (viewBtn) {
         state.currentView = viewBtn.dataset.view;
@@ -4992,6 +4999,10 @@ Objetivo
     });
 
     document.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape' && refs.newMenu && !refs.newMenu.classList.contains('is-hidden')) {
+        setNewMenuOpen(false);
+        return;
+      }
       if (event.key === 'Escape' && refs.notesModal && !refs.notesModal.classList.contains('is-hidden')) {
         closeNotesModal();
         return;
@@ -9004,10 +9015,26 @@ Objetivo
     });
   }
 
+  const VIEW_TITLES = {
+    'mobile-home': 'AndiApp', quote: 'Presupuestador', orders: 'Panel OT', database: 'Base de datos', contacts: 'Clientes',
+    finance: 'Finanzas', expenses: 'Gastos', attendance: 'Asistencia', inventory: 'Inventario', scenario: 'Escenario',
+    backup: 'Respaldo', docs: 'Ayuda técnica', summary: 'Resumen'
+  };
+
   function renderTabs() {
     document.querySelectorAll('[data-view]').forEach((tab) => {
       tab.classList.toggle('active', tab.dataset.view === state.currentView);
     });
+    document.body.dataset.currentView = state.currentView;
+    const mobileTitle = document.getElementById('mobile-section-title');
+    if (mobileTitle) mobileTitle.textContent = VIEW_TITLES[state.currentView] || 'AndiApp';
+  }
+
+  // Menú "+ Nuevo": atajos a secciones y acciones que ya existen (barra lateral y barra inferior móvil).
+  function setNewMenuOpen(open) {
+    if (!refs.newMenu) return;
+    refs.newMenu.classList.toggle('is-hidden', !open);
+    document.querySelectorAll('[data-action="toggle-new-menu"]').forEach((btn) => btn.setAttribute('aria-expanded', open ? 'true' : 'false'));
   }
 
   function renderMain(calc) {
@@ -11188,34 +11215,33 @@ Objetivo
     `;
   }
 
-  const MOBILE_HOME_SECTIONS = [
-    { view: 'attendance', label: 'Asistencia' },
-    { view: 'quote', label: 'Presupuestador' },
-    { view: 'orders', label: 'Panel OT' },
-    { view: 'expenses', label: 'Gastos' },
-    { view: 'finance', label: 'Finanzas' },
-    { view: 'contacts', label: 'Clientes' },
-    { view: 'database', label: 'Base de datos' },
-    { view: 'inventory', label: 'Inventario' },
-    { view: 'scenario', label: 'Escenario' }
+  // Mismas familias que la barra lateral de escritorio (index.html).
+  const MOBILE_HOME_GROUPS = [
+    { key: 'prod', label: 'Producción', sections: [['quote', 'Presupuestador'], ['orders', 'Panel OT'], ['database', 'Base de datos'], ['contacts', 'Clientes']] },
+    { key: 'money', label: 'Dinero', sections: [['finance', 'Finanzas'], ['expenses', 'Gastos']] },
+    { key: 'shop', label: 'Taller', sections: [['attendance', 'Asistencia'], ['inventory', 'Inventario']] },
+    { key: 'settings', label: 'Ajustes', sections: [['scenario', 'Escenario'], ['backup', 'Respaldo'], ['docs', 'Ayuda técnica']] }
   ];
 
   function renderMobileHome() {
-    const buttons = MOBILE_HOME_SECTIONS.map((section, index) => `
-      <button type="button" class="btn mobile-home-btn" data-view="${section.view}">
-        <span class="mobile-home-btn-index">${index + 1}.</span>
-        <span>${section.label}</span>
-      </button>
+    const groups = MOBILE_HOME_GROUPS.map((group) => `
+      <div class="mobile-home-group nav-group-${group.key}">
+        <span class="nav-group-title">${group.label}</span>
+        <div class="mobile-home-grid">
+          ${group.sections.map(([view, label]) => `<button type="button" class="btn mobile-home-btn" data-view="${view}">${label}</button>`).join('')}
+        </div>
+      </div>
     `).join('');
     return `
-      <div class="card">
-        <div class="section-title">
+      <div class="mobile-home">
+        <div class="mobile-home-head">
+          <img src="assets/logo/logoapp.svg" alt="" width="48" height="48" />
           <div>
             <h2>AndiApp</h2>
-            <p class="subtitle">Selecciona el área a la que quieres ir.</p>
+            <p class="subtitle">Elige la sección a la que quieres ir.</p>
           </div>
         </div>
-        <div class="mobile-home-menu">${buttons}</div>
+        <div class="mobile-home-menu">${groups}</div>
       </div>
     `;
   }
@@ -12356,7 +12382,7 @@ Objetivo
     let out = '';
 
     // ── Scale reference (top-right) ──────────────────────────────────
-    out += `<text x="${W - padR}" y="11" text-anchor="end" font-size="7.5" fill="#bbbbbb" font-family="JetBrains Mono,monospace">escala: ${scaleMaxH}h/día</text>`;
+    out += `<text x="${W - padR}" y="11" text-anchor="end" font-size="7.5" fill="#bbbbbb" font-family="IBM Plex Mono,monospace">escala: ${scaleMaxH}h/día</text>`;
 
     // ── Week-boundary vertical grid (day 7, 14, 21, 28) ─────────────
     const gridBottom = padT + nMonths * (rowH + gapH) - gapH;
@@ -12386,8 +12412,8 @@ Objetivo
 
       // Month label (two lines, vertically centered)
       const midY = rowY + rowH / 2;
-      out += `<text x="${padL - 8}" y="${(midY - 3.5).toFixed(1)}" text-anchor="end" font-size="9" font-weight="700" fill="#111111" font-family="JetBrains Mono,monospace">${monthLabel}</text>`;
-      out += `<text x="${padL - 8}" y="${(midY + 7).toFixed(1)}" text-anchor="end" font-size="7.5" fill="#777777" font-family="JetBrains Mono,monospace">${totalLabel} · ${daysWorked}d</text>`;
+      out += `<text x="${padL - 8}" y="${(midY - 3.5).toFixed(1)}" text-anchor="end" font-size="9" font-weight="700" fill="#111111" font-family="IBM Plex Mono,monospace">${monthLabel}</text>`;
+      out += `<text x="${padL - 8}" y="${(midY + 7).toFixed(1)}" text-anchor="end" font-size="7.5" fill="#777777" font-family="IBM Plex Mono,monospace">${totalLabel} · ${daysWorked}d</text>`;
 
       // Day bars
       Object.entries(monthDays).forEach(([dk, { ms, count }]) => {
@@ -12424,10 +12450,10 @@ Objetivo
     const axisY = H - 5;
     for (const d of [1, 5, 10, 15, 20, 25, 31]) {
       const ax = (padL + (d - 1) * slotW + slotW / 2).toFixed(1);
-      out += `<text x="${ax}" y="${axisY}" text-anchor="middle" font-size="7.5" fill="#aaaaaa" font-family="JetBrains Mono,monospace">${d}</text>`;
+      out += `<text x="${ax}" y="${axisY}" text-anchor="middle" font-size="7.5" fill="#aaaaaa" font-family="IBM Plex Mono,monospace">${d}</text>`;
     }
     // Axis title (right-align to not clash with bars)
-    out += `<text x="${padL + chartW}" y="${axisY}" text-anchor="end" font-size="7" fill="#cccccc" font-family="JetBrains Mono,monospace">día del mes →</text>`;
+    out += `<text x="${padL + chartW}" y="${axisY}" text-anchor="end" font-size="7" fill="#cccccc" font-family="IBM Plex Mono,monospace">día del mes →</text>`;
 
     return `<svg class="fin-chart-svg" viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;display:block;" xmlns="http://www.w3.org/2000/svg">${out}</svg>`;
   }

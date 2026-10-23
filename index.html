@@ -6,20 +6,20 @@
   <title>AndiApp · Costeo y gestión interna</title>
   <meta name="description" content="Plataforma interna para proyectar escenarios, costear trabajos y organizar órdenes de trabajo." />
   <script>
-    window.ERM_APP_VERSION = '2.0.18';
+    window.ERM_APP_VERSION = '2.1.0';
   </script>
-  <link rel="manifest" href="manifest.json?v=2.0.18" />
-  <link rel="icon" type="image/svg+xml" href="assets/logo/logoapp.svg?v=2.0.18" />
-  <link rel="icon" type="image/png" sizes="32x32" href="assets/logo/icons/logoapp-32.png?v=2.0.18" />
-  <link rel="apple-touch-icon" sizes="180x180" href="assets/logo/icons/logoapp-180.png?v=2.0.18" />
-  <meta name="theme-color" content="#2563eb" />
+  <link rel="manifest" href="manifest.json?v=2.1.0" />
+  <link rel="icon" type="image/svg+xml" href="assets/logo/logoapp.svg?v=2.1.0" />
+  <link rel="icon" type="image/png" sizes="32x32" href="assets/logo/icons/logoapp-32.png?v=2.1.0" />
+  <link rel="apple-touch-icon" sizes="180x180" href="assets/logo/icons/logoapp-180.png?v=2.1.0" />
+  <meta name="theme-color" content="#15181D" />
   <meta name="mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <meta name="apple-mobile-web-app-title" content="AndiApp" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link rel="stylesheet" href="assets/css/styles.css?v=2.0.18" />
+  <link rel="stylesheet" href="assets/css/styles.css?v=2.1.0" />
   <script type="module" src="https://ajax.googleapis.com/ajax/libs/model-viewer/3.4.0/model-viewer.min.js"></script>
 </head>
 <body>
@@ -42,31 +42,61 @@
     <div id="activity-log-list" class="activity-log-list is-hidden"></div>
   </div>
 
-  <div class="app-shell">
-    <header class="topbar">
-      <div>
-        <h1>AndiApp</h1>
+  <aside class="app-sidebar" aria-label="Menú principal">
+    <div class="sidebar-brand">
+      <img src="assets/logo/andiworks-cara-negativa.svg?v=2.1.0" alt="" width="30" height="32" />
+      <span class="sidebar-brand-text"><strong>AndiApp</strong><small>by AndiWorks<b>.cl</b></small></span>
+    </div>
+    <button type="button" class="btn-new" data-action="toggle-new-menu" aria-expanded="false" aria-controls="new-menu">+ Nuevo</button>
+    <nav class="nav-tabs" aria-label="Secciones">
+      <div class="nav-group nav-group-prod">
+        <span class="nav-group-title">Producción</span>
+        <button class="tab" data-view="quote">Presupuestador</button>
+        <button class="tab" data-view="orders">Panel OT</button>
+        <button class="tab" data-view="database">Base de datos</button>
+        <button class="tab" data-view="contacts">Clientes</button>
       </div>
+      <div class="nav-group nav-group-money">
+        <span class="nav-group-title">Dinero</span>
+        <button class="tab" data-view="finance">Finanzas</button>
+        <button class="tab" data-view="expenses">Gastos</button>
+      </div>
+      <div class="nav-group nav-group-shop">
+        <span class="nav-group-title">Taller</span>
+        <button class="tab" data-view="attendance">Asistencia</button>
+        <button class="tab" data-view="inventory">Inventario</button>
+      </div>
+      <div class="nav-group nav-group-settings">
+        <span class="nav-group-title">Ajustes</span>
+        <button class="tab active" data-view="scenario">Escenario</button>
+        <button class="tab" data-view="backup">Respaldo</button>
+        <button class="tab" data-view="docs">Ayuda técnica</button>
+      </div>
+    </nav>
+  </aside>
+
+  <div id="new-menu" class="new-menu is-hidden" role="menu" aria-label="Crear">
+    <span class="new-menu-title">Nuevo</span>
+    <button type="button" class="new-menu-item nav-group-prod" role="menuitem" data-view="quote"><span class="new-menu-dot"></span><span><strong>Cotización / OT</strong><small>Presupuestador</small></span></button>
+    <button type="button" class="new-menu-item nav-group-prod" role="menuitem" data-action="open-order-merge"><span class="new-menu-dot"></span><span><strong>Sumar OT desde archivo</strong><small>Importar JSON con control de números</small></span></button>
+    <button type="button" class="new-menu-item nav-group-money" role="menuitem" data-view="finance"><span class="new-menu-dot"></span><span><strong>Movimiento de caja</strong><small>Finanzas</small></span></button>
+    <button type="button" class="new-menu-item nav-group-money" role="menuitem" data-view="expenses"><span class="new-menu-dot"></span><span><strong>Gasto fijo</strong><small>Gastos</small></span></button>
+    <button type="button" class="new-menu-item nav-group-shop" role="menuitem" data-view="attendance"><span class="new-menu-dot"></span><span><strong>Marcar asistencia</strong><small>Asistencia</small></span></button>
+    <button type="button" class="new-menu-item nav-group-prod" role="menuitem" data-view="database"><span class="new-menu-dot"></span><span><strong>Insumo</strong><small>Base de datos</small></span></button>
+  </div>
+
+  <div class="app-shell">
+    <header class="mobile-topbar">
+      <img src="assets/logo/andiworks-cara-negativa.svg?v=2.1.0" alt="" width="24" height="26" />
+      <span id="mobile-section-title" class="mobile-section-title">AndiApp</span>
     </header>
 
-    <nav class="nav-tabs">
-      <button class="tab" data-view="attendance">1. Asistencia</button>
-      <button class="tab" data-view="quote">2. Presupuestador</button>
-      <button class="tab" data-view="orders">3. Panel OT</button>
-      <button class="tab" data-view="expenses">4. Gastos</button>
-      <button class="tab" data-view="finance">5. Finanzas</button>
-      <button class="tab" data-view="contacts">6. Clientes</button>
-      <button class="tab" data-view="database">7. Base de datos</button>
-      <button class="tab" data-view="inventory">8. Inventario</button>
-      <button class="tab active" data-view="scenario">9. Escenario</button>
-      <button class="tab tab-download-all" data-view="backup" title="Central de respaldos" aria-label="Central de respaldos">⤓</button>
-      <button class="tab tab-help" data-view="docs" title="Ayuda técnica y fórmulas" aria-label="Ayuda técnica y fórmulas">?</button>
-    </nav>
-
-    <nav class="mobile-topbar">
-      <button class="tab mobile-menu-btn" data-view="mobile-home" aria-label="Menú de secciones">☰ Menú</button>
-      <button class="tab tab-download-all" data-view="backup" title="Central de respaldos" aria-label="Central de respaldos">⤓</button>
-      <button class="tab tab-help" data-view="docs" title="Ayuda técnica y fórmulas" aria-label="Ayuda técnica y fórmulas">?</button>
+    <nav class="mobile-tabbar" aria-label="Navegación">
+      <button class="tab" data-view="mobile-home"><span class="mobile-tab-icon" aria-hidden="true">⌂</span><span>Inicio</span></button>
+      <button class="tab" data-view="attendance"><span class="mobile-tab-icon" aria-hidden="true">◷</span><span>Asistencia</span></button>
+      <button type="button" class="mobile-tab-new" data-action="toggle-new-menu" aria-label="Nuevo" aria-expanded="false" aria-controls="new-menu">+</button>
+      <button class="tab" data-view="orders"><span class="mobile-tab-icon" aria-hidden="true">▤</span><span>Panel OT</span></button>
+      <button class="tab" data-view="finance"><span class="mobile-tab-icon" aria-hidden="true">$</span><span>Finanzas</span></button>
     </nav>
 
     <main class="layout">
@@ -232,15 +262,15 @@
       new MutationObserver(updateDock).observe(document.body, { childList: true });
     })();
   </script>
-  <script src="assets/js/data.js?v=2.0.18"></script>
-  <script src="assets/js/storage.js?v=2.0.18"></script>
-  <script src="assets/js/calculations.js?v=2.0.18"></script>
+  <script src="assets/js/data.js?v=2.1.0"></script>
+  <script src="assets/js/storage.js?v=2.1.0"></script>
+  <script src="assets/js/calculations.js?v=2.1.0"></script>
   <script src="assets/js/vendor/jszip.min.js"></script>
   <script src="assets/js/vendor/jspdf.umd.min.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js"></script>
   <script src="assets/js/firebase-config.js"></script>
-  <script src="assets/js/sync.js?v=2.0.18"></script>
+  <script src="assets/js/sync.js?v=2.1.0"></script>
 </body>
 </html>

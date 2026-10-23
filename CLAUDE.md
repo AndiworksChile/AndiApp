@@ -40,6 +40,8 @@ New field → default in `ERMDefaults` (data.js) **and** normalization/migration
 - Logistics is added to total cost *before* computing the suggested price.
 
 ### Tabs
-Escenario, Presupuestador, Base de datos, Clientes, Panel OT, Inventario, Gastos, Asistencia, Finanzas, Backup (⤓), Ayuda técnica (?). There is no "Apps" tab in the current codebase.
+Escenario, Presupuestador, Base de datos, Clientes, Panel OT, Inventario, Gastos, Asistencia, Finanzas, Backup (Respaldo), Ayuda técnica. There is no "Apps" tab in the current codebase. Desktop navigation is a fixed sidebar in `index.html` grouped by family (Producción, Dinero, Taller, Ajustes) plus a "+ Nuevo" menu (`#new-menu`); on mobile (≤780px) it becomes a top bar plus a bottom tab bar, and `mobile-home` lists the same families. Any element with `data-view` acts as a navigation button (`renderTabs()` toggles `.active`), so never put `data-view` on containers.
+
+Visual line (2.1): AndiWorks brand — ink `#15181D`, white, workshop grey `#EEF0EE`, laser orange `#F26A1B` only as accent ("+ Nuevo", keyboard focus); Barlow Condensed for headings, Barlow for text, IBM Plex Mono for figures; 4px radius on controls, 6px on cards. Tokens live at the top of `styles.css`.
 
 Before editing, read the relevant render function in app.js and the state slice it touches. Visual changes go in `assets/css/styles.css`.

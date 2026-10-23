@@ -14,3 +14,6 @@
 *.dmg
 *.zip
 *backup*.json
+
+# Manual de marca: privado, nunca se publica
+/manual de marca/
