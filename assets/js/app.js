@@ -423,6 +423,8 @@ Objetivo
       imageMimeType: item.imageMimeType || '',
       imageSizeKb: Number(item.imageSizeKb || 0) || 0,
       expanded: Boolean(item.expanded),
+      maintenanceEveryDays: Math.max(0, Number(item.maintenanceEveryDays) || 0),
+      lastMaintenanceDate: String(item.lastMaintenanceDate || ''),
       offers: Array.isArray(item.offers) ? item.offers.map((offer) => ({
         id: offer.id || uid('off'),
         price: Number(offer.price || 0) || 0,
@@ -1560,8 +1562,203 @@ Objetivo
       baseYear: String(overrides.baseYear || new Date().getFullYear()),
       period,
       expenseType: String(overrides.expenseType || ''),
+      dueDay: Math.min(31, Math.max(0, Math.round(Number(overrides.dueDay) || 0))),
+      firstDueMonth: Math.min(12, Math.max(1, Math.round(Number(overrides.firstDueMonth) || 1))),
       entries: normalizeExpenseEntries(entrySource, period)
     };
+  }
+
+  const MONTH_NAMES = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
+
+  // Fecha de vencimiento de la cuota `index`: con día fijo se calcula desde el año base, el mes de
+  // la primera cuota y el período (mensual = cada mes, trimestral = cada 3...). Sin día fijo, usa la fecha de la fila.
+  function getExpenseEntryDueDate(card, index) {
+    const dueDay = Number(card?.dueDay) || 0;
+    const entry = card?.entries?.[index];
+    if (!dueDay) return String(entry?.date || '');
+    const step = 12 / (expensePeriodConfig[card.period]?.entries || 12);
+    const monthOffset = (Number(card.firstDueMonth) || 1) - 1 + index * step;
+    const year = (Number(card.baseYear) || new Date().getFullYear()) + Math.floor(monthOffset / 12);
+    const month = monthOffset % 12;
+    const lastDay = new Date(year, month + 1, 0).getDate();
+    return toLocalDateValue(new Date(year, month, Math.min(dueDay, lastDay)));
+  }
+
+  function daysUntil(dateKey) {
+    if (!dateKey) return null;
+    const [y, m, d] = String(dateKey).split('-').map(Number);
+    const target = new Date(y, (m || 1) - 1, d || 1);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    return Math.round((target - today) / 86400000);
+  }
+
+  // Cuotas sin pagar que vencen dentro de `daysAhead` días (o ya vencidas), de todas las cards.
+  function getExpenseDueList(daysAhead = 15) {
+    const list = [];
+    (state.expenses?.cards || []).forEach((card) => {
+      (card.entries || []).forEach((entry, index) => {
+        if (entry.status === 'pagado') return;
+        const due = getExpenseEntryDueDate(card, index);
+        const days = daysUntil(due);
+        if (days === null || days > daysAhead) return;
+        list.push({ card, entry, index, due, days });
+      });
+    });
+    return list.sort((a, b) => a.days - b.days);
+  }
+
+  // Línea de tiempo de pagos (Gastos): cuotas sin pagar vencidas + las de los próximos `days` días.
+  function renderExpenseTimeline() {
+    const windowDays = [30, 60, 90].includes(Number(state.ui.expenseTimelineDays)) ? Number(state.ui.expenseTimelineDays) : 30;
+    const list = getExpenseDueList(windowDays);
+    const overdue = list.filter((item) => item.days < 0);
+    const upcoming = list.filter((item) => item.days >= 0);
+    const rows = getFinanceRunningRows(state.finance?.entries || [], state.finance?.initialBalance || 0);
+    const cash = rows.length ? rows[rows.length - 1].runningBalance : Number(state.finance?.initialBalance || 0);
+    const totalDue = list.reduce((acc, item) => acc + (Number(item.entry.amount) || 0), 0);
+    const cashAfter = cash - totalDue;
+    const hasDueDays = (state.expenses?.cards || []).some((card) => Number(card.dueDay) > 0);
+    const today = new Date();
+    const dayLabel = (offset) => { const d = new Date(today); d.setDate(d.getDate() + offset); return `${String(d.getDate()).padStart(2, '0')}-${String(d.getMonth() + 1).padStart(2, '0')}`; };
+    // Marcas del eje: semanales en escritorio; en el teléfono más espaciadas para que no se monten.
+    const tickStep = isMobileViewport() ? (windowDays > 30 ? 30 : 14) : 7;
+    const ticks = Array.from({ length: Math.floor(windowDays / tickStep) + 1 }, (_, i) => i * tickStep).filter((d) => d <= windowDays);
+    const lanes = [];
+    const pins = upcoming.map((item) => {
+      const left = item.days / windowDays * 100;
+      // Pines cercanos bajan de carril para no taparse.
+      let lane = 0;
+      while (lanes[lane] !== undefined && left - lanes[lane] < 9) lane += 1;
+      lanes[lane] = left;
+      return `<button type="button" class="tl-pin" style="left:${left.toFixed(2)}%;top:${30 + lane * 30}px;--pin:${sanitize(item.card.color || '#596069')}" data-action="go-to-expense" data-id="${sanitize(item.card.id)}" title="${sanitize(`${item.card.name} · ${formatFinanceDate(item.due)} · ${formatCurrency(item.entry.amount || 0)}`)}"><span class="tl-pin-dot"></span>${sanitize(item.card.name)}</button>`;
+    }).join('');
+    const trackHeight = 30 + Math.max(1, lanes.length) * 30 + 8;
+    const weekName = (days) => days < 7 ? 'Esta semana' : days < 14 ? 'Próxima semana' : `En ${Math.floor(days / 7)} semanas`;
+    const agendaGroups = [];
+    if (overdue.length) agendaGroups.push(['Vencidas sin pagar', overdue]);
+    upcoming.forEach((item) => {
+      const name = weekName(item.days);
+      const group = agendaGroups.find((g) => g[0] === name);
+      if (group) group[1].push(item); else agendaGroups.push([name, [item]]);
+    });
+    const agenda = agendaGroups.map(([name, items]) => `
+      <div class="tl-agenda-group ${name.startsWith('Vencidas') ? 'is-overdue' : ''}">
+        <div class="tl-agenda-head"><strong>${name}</strong><span class="mono">${formatCurrency(items.reduce((acc, item) => acc + (Number(item.entry.amount) || 0), 0))}</span></div>
+        ${items.map((item) => `
+          <div class="tl-agenda-row">
+            <span class="mono tl-date">${sanitize(formatFinanceDate(item.due))}</span>
+            <span class="tl-sq" style="background:${sanitize(item.card.color || '#596069')}"></span>
+            <span class="tl-name">${sanitize(item.card.name)} <span class="small">${sanitize(item.entry.label || `Cuota ${item.index + 1}`)} · ${formatDueLabel(item.days)}</span></span>
+            <span class="mono">${formatCurrency(item.entry.amount || 0)}</span>
+            <button type="button" class="btn btn-soft btn-xs" data-action="pay-expense-entry" data-card-id="${sanitize(item.card.id)}" data-index="${item.index}" title="Marca la cuota como pagada y abre Finanzas con el egreso listo">Pagar</button>
+          </div>`).join('')}
+      </div>`).join('');
+    return `
+      <div class="card expense-timeline">
+        <div class="section-title">
+          <div>
+            <h3>Pagos de los próximos ${windowDays} días</h3>
+            <p class="subtitle">Caja hoy <strong class="mono">${formatCurrency(cash)}</strong> · después de pagar todo queda <strong class="mono ${cashAfter < 0 ? 'is-bad' : ''}">${formatCurrency(cashAfter)}</strong></p>
+          </div>
+          <div class="tl-windows" role="group" aria-label="Ventana de tiempo">
+            ${[30, 60, 90].map((d) => `<button type="button" class="tl-window ${d === windowDays ? 'active' : ''}" data-action="set-expense-timeline" data-days="${d}" aria-pressed="${d === windowDays}">${d} días</button>`).join('')}
+          </div>
+        </div>
+        ${!hasDueDays ? '<p class="help">Para que los pagos aparezcan aquí, configura en cada gasto "Vence el día" y "Primera cuota en".</p>' : ''}
+        <div class="tl-track" style="height:${trackHeight}px">
+          <div class="tl-axis"></div>
+          ${ticks.map((d) => `<span class="tl-tick" style="left:${(d / windowDays * 100).toFixed(2)}%"><span class="mono">${d === 0 ? 'HOY' : dayLabel(d)}</span></span>`).join('')}
+          ${pins}
+        </div>
+        ${agenda ? `<div class="tl-agenda">${agenda}</div>` : '<div class="today-empty">✓ Sin pagos pendientes en esta ventana.</div>'}
+      </div>`;
+  }
+
+  // Avisos automáticos de Finanzas: frases cortas a partir de los datos que ya existen.
+  function getFinanceInsights() {
+    const insights = [];
+    const entries = state.finance?.entries || [];
+    const now = new Date();
+    const monthKey = toLocalDateValue(now).slice(0, 7);
+    const monthName = MONTH_NAMES[now.getMonth()];
+    const month = getFinanceMonthSummary(entries, monthKey);
+    if (month.count) {
+      const diff = month.totalIncome - month.totalExpense;
+      insights.push(diff < 0
+        ? { tone: 'bad', title: `${monthName} va con más egresos que ingresos`, detail: `Ingresos ${formatCurrency(month.totalIncome)} · egresos ${formatCurrency(month.totalExpense)} · diferencia ${formatCurrency(diff)}.` }
+        : { tone: 'good', title: `${monthName} va con ${formatCurrency(diff)} a favor`, detail: `Ingresos ${formatCurrency(month.totalIncome)} · egresos ${formatCurrency(month.totalExpense)}.` });
+    }
+
+    const ivaLedger = getFinanceIvaLedger(entries, state.finance?.ivaCreditBalance, state.scenario?.ivaRate);
+    const ivaRow = ivaLedger.byMonth[monthKey];
+    if (ivaRow && (ivaRow.ivaDebito || ivaRow.ivaCreditoMes)) {
+      insights.push(ivaRow.ivaToPay > 0
+        ? { tone: 'warn', title: `IVA estimado del F29 de ${monthName}: ${formatCurrency(ivaRow.ivaToPay)}`, detail: `Débito ${formatCurrency(ivaRow.ivaDebito)} menos crédito disponible ${formatCurrency(ivaRow.creditoDisponible)}.`, action: 'data-action="set-finance-tab" data-tab="res"', cta: 'Ver IVA' }
+        : { tone: 'good', title: `Sin IVA a pagar en ${monthName}`, detail: `Queda un remanente de crédito fiscal de ${formatCurrency(ivaRow.remanenteFin)} para el mes siguiente.`, action: 'data-action="set-finance-tab" data-tab="res"', cta: 'Ver IVA' });
+    }
+
+    const rows = getFinanceRunningRows(entries, state.finance?.initialBalance || 0);
+    const cutoff = new Date(now.getFullYear(), now.getMonth() - 6, now.getDate());
+    const cutoffKey = toLocalDateValue(cutoff);
+    if (rows.some((row) => row.date && row.date < cutoffKey)) {
+      const before = rows.filter((row) => row.date && row.date < cutoffKey);
+      const start = before[before.length - 1].runningBalance;
+      const end = rows[rows.length - 1].runningBalance;
+      const change = end - start;
+      insights.push({ tone: change >= 0 ? 'good' : 'bad', title: `La caja ${change >= 0 ? 'creció' : 'bajó'} ${formatCurrency(Math.abs(change))} en 6 meses`, detail: `De ${formatCurrency(start)} a ${formatCurrency(end)}.` });
+    }
+
+    const minimumMargin = Number(state.scenario?.minimumMargin) || 0;
+    const recent = (state.orders || []).filter((order) => !isPrototypeOrder(order) && Number(order.quoteSummary?.effectiveNet) > 0)
+      .sort((a, b) => String(b.createdAt || b.quoteDate || '').localeCompare(String(a.createdAt || a.quoteDate || '')))
+      .slice(0, 6);
+    const lowMargin = recent.filter((order) => Number(order.quoteSummary?.realMargin || 0) + 1e-6 < minimumMargin);
+    if (recent.length && minimumMargin > 0) {
+      insights.push(lowMargin.length
+        ? { tone: 'warn', title: `${lowMargin.length} de las últimas ${recent.length} OT ${lowMargin.length === 1 ? 'quedó' : 'quedaron'} bajo tu margen mínimo (${formatPercent(minimumMargin)})`, detail: lowMargin.map((order) => `${order.orderNumber || '-'} ${formatPercent(order.quoteSummary?.realMargin || 0)}`).join(' · '), action: 'data-view="orders"', cta: 'Ver OT' }
+        : { tone: 'good', title: `Las últimas ${recent.length} OT respetan tu margen mínimo`, detail: `Margen mínimo del Escenario: ${formatPercent(minimumMargin)}.` });
+    }
+
+    const pending = (state.orders || []).map(getOrderPaymentStatus).filter((pay) => pay.kind === 'pending' && pay.pending > 0);
+    if (pending.length) {
+      insights.push({ tone: 'info', title: `${formatCurrency(pending.reduce((acc, pay) => acc + pay.pending, 0))} por cobrar en ${pending.length} OT`, detail: 'Aceptadas, abonadas o entregadas sin pagar completo.', action: 'data-view="home"', cta: 'Ver en Inicio' });
+    }
+    return insights;
+  }
+
+  function renderFinanceInsights() {
+    const insights = getFinanceInsights();
+    if (!insights.length) return '';
+    return `
+      <div class="fin-insights" aria-label="Avisos de Finanzas">
+        ${insights.map((item) => `
+          <div class="fin-insight tone-${item.tone}">
+            <strong>${sanitize(item.title)}</strong>
+            <span>${sanitize(item.detail)}</span>
+            ${item.action ? `<button type="button" class="btn btn-soft btn-xs" ${item.action}>${item.cta}</button>` : ''}
+          </div>`).join('')}
+      </div>`;
+  }
+
+  function renderExpenseDueDayOptions(current) {
+    const value = Number(current) || 0;
+    return [`<option value="0" ${!value ? 'selected' : ''}>Sin día fijo</option>`]
+      .concat(Array.from({ length: 31 }, (_, i) => `<option value="${i + 1}" ${value === i + 1 ? 'selected' : ''}>${i + 1}</option>`))
+      .join('');
+  }
+
+  function renderExpenseMonthOptions(current) {
+    const value = Number(current) || 1;
+    return MONTH_NAMES.map((name, i) => `<option value="${i + 1}" ${value === i + 1 ? 'selected' : ''}>${name}</option>`).join('');
+  }
+
+  function formatDueLabel(days) {
+    if (days === null) return '';
+    if (days < 0) return `vencida hace ${-days} día${days === -1 ? '' : 's'}`;
+    if (days === 0) return 'vence hoy';
+    if (days === 1) return 'vence mañana';
+    return `vence en ${days} días`;
   }
 
   function getExpenseSummary(card) {
@@ -2530,6 +2727,107 @@ Objetivo
     attendanceChronoTimer = window.setInterval(renderNow, 1000);
   }
 
+  // ---- Tiempo por OT y máquinas (etapa 3) ----
+  // Tu tiempo del turno se reparte en partes iguales entre las OT marcadas mientras trabajas
+  // (en pausa no suma). Las máquinas se cronometran aparte, cada una ligada a una OT.
+  function normalizeOrderTimeMap(map) {
+    const out = {};
+    Object.entries(map && typeof map === 'object' ? map : {}).forEach(([id, ms]) => {
+      const value = Math.max(0, Number(ms) || 0);
+      if (id && value) out[id] = value;
+    });
+    return out;
+  }
+
+  function normalizeSessionOrderFields(session) {
+    return {
+      orderIds: (Array.isArray(session?.orderIds) ? session.orderIds : []).map(String).filter(Boolean),
+      orderTimeMs: normalizeOrderTimeMap(session?.orderTimeMs),
+      orderAllocSince: session?.orderAllocSince || null
+    };
+  }
+
+  function normalizeMachineTimers(list) {
+    return (Array.isArray(list) ? list : [])
+      .filter((item) => item && item.machine && item.startAt)
+      .map((item) => ({ id: item.id || uid('mach'), machine: String(item.machine), orderId: String(item.orderId || ''), startAt: item.startAt }));
+  }
+
+  function normalizeMachineRecords(list) {
+    return (Array.isArray(list) ? list : [])
+      .filter((item) => item && item.machine && item.startAt && item.endAt)
+      .map((item) => ({
+        id: item.id || uid('mach-rec'),
+        machine: String(item.machine),
+        orderId: String(item.orderId || ''),
+        startAt: item.startAt,
+        endAt: item.endAt,
+        ms: Math.max(0, Number(item.ms) || 0)
+      }));
+  }
+
+  // Suma al reparto el tiempo trabajado desde la última asignación y reinicia el contador.
+  function allocateSessionOrderTime(session, nowMs = Date.now()) {
+    if (!session) return;
+    Object.assign(session, normalizeSessionOrderFields(session));
+    const sinceMs = new Date(session.orderAllocSince || 0).getTime();
+    if (!session.isPaused && session.orderIds.length && sinceMs && nowMs > sinceMs) {
+      const share = (nowMs - sinceMs) / session.orderIds.length;
+      session.orderIds.forEach((id) => { session.orderTimeMs[id] = (session.orderTimeMs[id] || 0) + share; });
+    }
+    session.orderAllocSince = new Date(nowMs).toISOString();
+  }
+
+  // Detalle del tiempo de una OT: jornadas (tu parte de cada turno) y usos de máquina.
+  function getOrderTimeDetail(orderId) {
+    const key = String(orderId || '');
+    const attendance = state.attendance || {};
+    const shifts = (attendance.records || [])
+      .filter((record) => Number(record.orderTimeMs?.[key]) > 0)
+      .map((record) => ({ date: record.checkInAt, person: record.employeeName, ms: Number(record.orderTimeMs[key]) || 0, live: false }));
+    const session = attendance.activeSession;
+    if (session && ((session.orderIds || []).includes(key) || Number(session.orderTimeMs?.[key]) > 0)) {
+      const sinceMs = new Date(session.orderAllocSince || 0).getTime();
+      const running = !session.isPaused && (session.orderIds || []).includes(key) && sinceMs;
+      const liveMs = (Number(session.orderTimeMs?.[key]) || 0) + (running ? Math.max(0, Date.now() - sinceMs) / session.orderIds.length : 0);
+      shifts.unshift({ date: session.checkInAt, person: session.employeeName, ms: liveMs, live: true });
+    }
+    const machines = normalizeMachineRecords(attendance.machineRecords).filter((item) => item.orderId === key)
+      .map((item) => ({ date: item.startAt, machine: item.machine, ms: item.ms, live: false }));
+    normalizeMachineTimers(attendance.machineTimers).filter((item) => item.orderId === key)
+      .forEach((item) => machines.unshift({ date: item.startAt, machine: item.machine, ms: Math.max(0, Date.now() - new Date(item.startAt).getTime()), live: true }));
+    const personMs = shifts.reduce((acc, item) => acc + item.ms, 0);
+    const machineMs = machines.reduce((acc, item) => acc + item.ms, 0);
+    const byPerson = {};
+    shifts.forEach((item) => { byPerson[item.person || 'Sin nombre'] = (byPerson[item.person || 'Sin nombre'] || 0) + item.ms; });
+    const byMachine = {};
+    machines.forEach((item) => { byMachine[item.machine] = (byMachine[item.machine] || 0) + item.ms; });
+    return { shifts, machines, personMs, machineMs, totalMs: personMs + machineMs, byPerson, byMachine };
+  }
+
+  function formatMsAsHours(ms) {
+    return formatHoursMinutes((Number(ms) || 0) / 3600000);
+  }
+
+  // Contadores en vivo: [data-live-since] suma (ahora - since) / data-live-div a data-live-base.
+  let liveTimersInterval = null;
+  function syncLiveTimers() {
+    if (liveTimersInterval) { window.clearInterval(liveTimersInterval); liveTimersInterval = null; }
+    const nodes = Array.from(refs.mainPanel?.querySelectorAll('[data-live-since]') || []);
+    if (!nodes.length) return;
+    const tick = () => {
+      const now = Date.now();
+      nodes.forEach((node) => {
+        const since = new Date(node.dataset.liveSince).getTime();
+        const base = Number(node.dataset.liveBase) || 0;
+        const div = Number(node.dataset.liveDiv) || 1;
+        node.textContent = formatDurationFromMs(base + (Number.isNaN(since) ? 0 : Math.max(0, now - since) / div));
+      });
+    };
+    tick();
+    liveTimersInterval = window.setInterval(tick, 1000);
+  }
+
   function syncAttendanceCommentsInput() {
     if (!state.attendance?.activeSession) return;
     const input = document.getElementById('attendance-comments');
@@ -2604,11 +2902,49 @@ Objetivo
     }
   }
 
-  function logActivity(message) {
+  // Deshacer: antes de cada clic o cambio se toma una foto de las bases. Si la acción deja
+  // registro en el historial, esa foto queda en la pila y "Deshacer" la restaura.
+  // La pila vive solo en memoria (se pierde al recargar) para no duplicar adjuntos pesados.
+  const UNDO_BRANCHES = ['scenario', 'quote', 'database', 'contacts', 'orders', 'inventory', 'expenses', 'attendance', 'finance'];
+  const UNDO_LIMIT = 15;
+  const undoStack = [];
+  let preActionSnapshot = null;
+
+  function captureUndoSnapshot() {
+    try {
+      preActionSnapshot = JSON.stringify(UNDO_BRANCHES.reduce((acc, key) => { acc[key] = state[key]; return acc; }, {}));
+    } catch (error) {
+      preActionSnapshot = null;
+    }
+  }
+
+  function undoLastAction() {
+    const last = undoStack.pop();
+    if (!last) return;
+    const snapshot = JSON.parse(last.snapshot);
+    UNDO_BRANCHES.forEach((key) => { if (snapshot[key] !== undefined) state[key] = snapshot[key]; });
+    // Fichas abiertas podrían apuntar a registros que ya no existen.
+    state.ui.editingMaterialId = null;
+    state.ui.databaseDraft = null;
+    state.ui.editingContactId = null;
+    state.ui.contactDraft = null;
+    state.ui.financeEditingEntryId = null;
+    preActionSnapshot = null;
+    logActivity(`Deshecho: ${last.message}`, { undoable: false });
+    render();
+  }
+
+  function logActivity(message, options = {}) {
     const text = String(message || '').trim();
     if (!text) return;
     state.ui.activityLog = Array.isArray(state.ui.activityLog) ? state.ui.activityLog : [];
-    state.ui.activityLog.unshift({ message: text, at: new Date().toISOString() });
+    const at = new Date().toISOString();
+    if (options.undoable !== false && preActionSnapshot) {
+      undoStack.push({ message: text, at, snapshot: preActionSnapshot });
+      if (undoStack.length > UNDO_LIMIT) undoStack.shift();
+      preActionSnapshot = null;
+    }
+    state.ui.activityLog.unshift({ message: text, at });
     if (state.ui.activityLog.length > 40) state.ui.activityLog.length = 40;
     renderActivityLog();
   }
@@ -2623,6 +2959,11 @@ Objetivo
     const entries = Array.isArray(state.ui?.activityLog) ? state.ui.activityLog : [];
     if (refs.activityLogLatest) {
       refs.activityLogLatest.textContent = entries.length ? entries[0].message : 'Sin actividad reciente';
+    }
+    if (refs.activityUndoBtn) {
+      const last = undoStack[undoStack.length - 1];
+      refs.activityUndoBtn.disabled = !last;
+      refs.activityUndoBtn.title = last ? `Deshacer: ${last.message} (Ctrl/Cmd + Z)` : 'Nada que deshacer';
     }
     if (refs.activityLogList) {
       refs.activityLogList.innerHTML = entries.length
@@ -2888,6 +3229,7 @@ Objetivo
     refs.newMenu = document.getElementById('new-menu');
     refs.activityLogLatest = document.getElementById('activity-log-latest');
     refs.activityLogList = document.getElementById('activity-log-list');
+    refs.activityUndoBtn = document.getElementById('activity-undo-btn');
     refs.calculatorModal = document.getElementById('calculator-modal');
     refs.calculatorDisplay = document.getElementById('calculator-display');
 
@@ -2923,8 +3265,11 @@ Objetivo
       state.ui.theme = 'light';
     }
 
+    // Se parte siempre en Inicio: en el teléfono con las secciones, en escritorio con lo del día.
     if (isMobileViewport() && state.currentView !== 'mobile-home') {
       state.currentView = 'mobile-home';
+    } else if (!isMobileViewport()) {
+      state.currentView = 'home';
     }
 
     applyTheme(state.ui.theme);
@@ -3023,6 +3368,13 @@ Objetivo
       });
     });
 
+    // Foto previa para Deshacer (fase de captura: ocurre antes de cualquier acción).
+    document.addEventListener('click', (event) => {
+      if (event.target.closest?.('[data-action="undo-last-action"]')) return;
+      captureUndoSnapshot();
+    }, true);
+    document.addEventListener('change', captureUndoSnapshot, true);
+
     document.addEventListener('click', async (event) => {
       if (event.target.closest('[data-action="toggle-new-menu"]')) {
         setNewMenuOpen(refs.newMenu?.classList.contains('is-hidden'));
@@ -3069,6 +3421,11 @@ Objetivo
         } else {
           closeNotesModal();
         }
+        return;
+      }
+
+      if (action === 'undo-last-action') {
+        undoLastAction();
         return;
       }
 
@@ -3206,7 +3563,8 @@ Objetivo
         state.ui.databaseDraft = {
           ...(state.ui.databaseDraft || {}),
           provider: provider ? provider.name : PROVIDER_PRIVATE,
-          supplierContact: provider ? providerContactText(provider) : ''
+          supplierContact: provider ? providerContactText(provider) : '',
+          supplierAddress: provider ? (providerAddressText(provider) || state.ui.databaseDraft?.supplierAddress || '') : ''
         };
         render();
         return;
@@ -3573,6 +3931,30 @@ Objetivo
         return;
       }
 
+      if (action === 'quick-add-material') {
+        const line = addQuoteMaterialLine(actionBtn.dataset.id);
+        if (!line) return;
+        render();
+        const focusSel = state.ui.quoteOpenLineId === line.id ? `[data-line-dim="pieceWidthCm"][data-id="${line.id}"]` : `[data-collection="quote.materials"][data-id="${line.id}"][data-key="quantity"]`;
+        const el = document.querySelector(focusSel);
+        if (el) { el.scrollIntoView({ block: 'center' }); el.focus(); el.select?.(); }
+        return;
+      }
+
+      if (action === 'toggle-quote-line') {
+        state.ui.quoteOpenLineId = state.ui.quoteOpenLineId === actionBtn.dataset.id ? null : actionBtn.dataset.id;
+        render();
+        return;
+      }
+
+      if (action === 'set-line-waste') {
+        const row = state.quote.materials.find((item) => item.id === actionBtn.dataset.id);
+        if (!row) return;
+        row.wastePercent = Number(actionBtn.dataset.waste) || 0;
+        render();
+        return;
+      }
+
       if (action === 'add-material-line') {
         state.quote.materials.push({
           id: uid('qlm'),
@@ -3684,7 +4066,7 @@ Objetivo
         state.ui.contactDraft = { ...(state.contacts.find((item) => item.id === actionBtn.dataset.id) || {}) };
         state.currentView = 'contacts';
         render();
-        window.scrollTo(0, 0);
+        if (!isSplitFichaLayout()) window.scrollTo(0, 0);
       }
 
       if (action === 'append-whatsapp') {
@@ -3731,12 +4113,26 @@ Objetivo
         if (!confirmSafe('¿Quieres limpiar la ficha del cliente y volver a los valores por defecto?')) return;
         state.ui.editingContactId = null;
         state.ui.contactDraft = null;
+        state.ui.contactFormOpen = true;
         render();
+      }
+
+      if (action === 'open-contact-form') {
+        state.ui.editingContactId = null;
+        state.ui.contactDraft = null;
+        state.ui.contactFormOpen = true;
+        state.ui.contactsMobileView = 'new';
+        state.currentView = 'contacts';
+        render();
+        window.scrollTo(0, 0);
+        document.querySelector('[data-contact-draft="name"]')?.focus();
+        return;
       }
 
       if (action === 'cancel-edit-contact') {
         state.ui.editingContactId = null;
         state.ui.contactDraft = null;
+        state.ui.contactFormOpen = false;
         state.ui.contactsMobileView = 'agenda';
         render();
       }
@@ -3912,6 +4308,36 @@ Objetivo
         return;
       }
 
+      if (action === 'set-order-preview-tab') {
+        state.ui.orderPreviewTab = actionBtn.dataset.tab || 'resumen';
+        render();
+        return;
+      }
+
+      if (action === 'register-order-payment') {
+        // Abre Finanzas con el cobro listo: Ventas, OT ligada y el monto que falta.
+        const order = findOrderById(actionBtn.dataset.id);
+        if (!order) return;
+        const payment = getOrderPaymentStatus(order);
+        state.ui.financeEditingEntryId = null;
+        state.ui.financeDraft = createFinanceEntry({
+          category: 'Ventas',
+          orderId: order.id,
+          orderRef: order.orderNumber || '',
+          title: String(order.orderTitle || '').trim(),
+          income: payment.financeGap || payment.pending,
+          ivaIncluded: true
+        });
+        state.ui.financeTab = 'mov';
+        state.currentView = 'finance';
+        render();
+        setTimeout(() => {
+          const el = document.getElementById('fin-income');
+          if (el) { el.scrollIntoView({ behavior: 'smooth', block: 'center' }); el.focus(); }
+        }, 120);
+        return;
+      }
+
       if (action === 'select-order-tab') {
         state.ui.selectedOrderId = actionBtn.dataset.id || null;
         render();
@@ -3936,6 +4362,102 @@ Objetivo
         render();
       }
 
+      if (action === 'save-link') {
+        const name = String(document.getElementById('link-name')?.value || '').trim();
+        const url = normalizeLinkUrl(document.getElementById('link-url')?.value);
+        const group = String(document.getElementById('link-group')?.value || '').trim() || 'General';
+        const pinned = Boolean(document.getElementById('link-pinned')?.checked);
+        if (!name) { window.alert('Escribe un nombre para el enlace.'); return; }
+        if (!url) { window.alert('La dirección debe ser una página web (http o https).'); return; }
+        state.scenario.links = getLinks();
+        const current = state.scenario.links.find((link) => link.id === state.ui.editingLinkId);
+        if (current) Object.assign(current, { name, url, group, pinned });
+        else state.scenario.links.push({ id: uid('lnk'), name, url, group, pinned });
+        state.ui.editingLinkId = null;
+        stampBaseUpdate('scenario', { silent: true });
+        logActivity(`Enlace guardado: ${name}`);
+        render();
+        return;
+      }
+
+      if (action === 'edit-link') { state.ui.editingLinkId = actionBtn.dataset.id || null; render(); document.getElementById('link-name')?.focus(); return; }
+      if (action === 'cancel-edit-link') { state.ui.editingLinkId = null; render(); return; }
+
+      if (action === 'toggle-link-pin') {
+        const link = getLinks().find((item) => item.id === actionBtn.dataset.id);
+        if (!link) return;
+        link.pinned = !link.pinned;
+        stampBaseUpdate('scenario', { silent: true });
+        logActivity(`${link.pinned ? 'Fijado en el menú' : 'Quitado del menú'}: ${link.name}`);
+        render();
+        return;
+      }
+
+      if (action === 'delete-link') {
+        const link = getLinks().find((item) => item.id === actionBtn.dataset.id);
+        if (!link || !confirmSafe(`¿Eliminar el enlace "${link.name}"?`)) return;
+        state.scenario.links = getLinks().filter((item) => item.id !== link.id);
+        if (state.ui.editingLinkId === link.id) state.ui.editingLinkId = null;
+        stampBaseUpdate('scenario', { silent: true });
+        logActivity(`Enlace eliminado: ${link.name}`);
+        render();
+        return;
+      }
+
+      if (action === 'go-to-order') {
+        state.ui.selectedOrderId = actionBtn.dataset.id || null;
+        state.ui.orderPreviewTab = actionBtn.dataset.tab || 'resumen';
+        state.currentView = 'orders';
+        render();
+        if (isMobileViewport()) document.querySelector('.ot-preview')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        return;
+      }
+
+      if (action === 'set-expense-timeline') {
+        state.ui.expenseTimelineDays = Number(actionBtn.dataset.days) || 30;
+        render();
+        return;
+      }
+
+      if (action === 'pay-expense-entry') {
+        // Marca la cuota como pagada y abre Finanzas con el egreso armado y ligado a la card.
+        const card = (state.expenses.cards || []).find((item) => item.id === actionBtn.dataset.cardId);
+        const index = Number(actionBtn.dataset.index);
+        const entry = card?.entries?.[index];
+        if (!card || !entry) return;
+        const todayKey = toLocalDateValue(new Date());
+        entry.status = 'pagado';
+        if (!entry.date) entry.date = todayKey;
+        if (state.ui.expenseDraft && state.ui.expenseDraft.id === card.id) state.ui.expenseDraft = JSON.parse(JSON.stringify(card));
+        stampBaseUpdate('expenses', { silent: true });
+        logActivity(`Pagado: ${card.name} · ${entry.label || `Cuota ${index + 1}`}`);
+        state.ui.financeEditingEntryId = null;
+        state.ui.financeDraft = createFinanceEntry({
+          category: 'Gastos Administrativos',
+          gastoType: card.expenseType || '',
+          expenseCardId: card.id,
+          title: `${card.name} · ${entry.label || `Cuota ${index + 1}`}`,
+          expense: Number(entry.amount) || 0,
+          date: todayKey
+        });
+        state.ui.financeTab = 'mov';
+        state.currentView = 'finance';
+        render();
+        setTimeout(() => document.getElementById('fin-expense')?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 120);
+        return;
+      }
+
+      if (action === 'go-to-expense') {
+        const card = (state.expenses.cards || []).find((item) => item.id === actionBtn.dataset.id);
+        if (!card) return;
+        state.ui.selectedExpenseId = card.id;
+        state.ui.expenseDraft = JSON.parse(JSON.stringify(card));
+        state.ui.expenseMobileView = 'detail';
+        state.currentView = 'expenses';
+        render();
+        return;
+      }
+
       if (action === 'open-order-card') {
         state.ui.selectedOrderId = actionBtn.dataset.id || null;
         state.currentView = 'orders';
@@ -3945,9 +4467,32 @@ Objetivo
         }
       }
 
+      if (action === 'scroll-quote-step') {
+        const target = document.getElementById(`quote-step-${actionBtn.dataset.step}`);
+        if (target) {
+          const details = target.querySelector('details');
+          if (details) details.open = true;
+          target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+        return;
+      }
+
+      if (action === 'set-scenario-tab') {
+        state.ui.scenarioTab = actionBtn.dataset.tab || 'time';
+        render();
+        return;
+      }
+
+      if (action === 'set-finance-tab') {
+        state.ui.financeTab = actionBtn.dataset.tab || 'mov';
+        render();
+        return;
+      }
+
       if (action === 'go-to-finance-entry') {
         const entryId = actionBtn.dataset.id || '';
         if (!entryId) return;
+        state.ui.financeTab = 'mov';
         state.ui.financeHighlightEntryId = entryId;
         state.currentView = 'finance';
         window.ERMStorage.save(state);
@@ -4029,7 +4574,21 @@ Objetivo
       if (action === 'clear-material-form') {
         state.ui.editingMaterialId = null;
         state.ui.databaseDraft = null;
+        state.ui.databaseFormOpen = true;
         render();
+      }
+
+      if (action === 'open-material-form') {
+        state.ui.editingMaterialId = null;
+        state.ui.databaseDraft = null;
+        state.ui.databaseFormOpen = true;
+        state.ui.databaseSection = 'materials';
+        state.ui.databaseMobileView = 'new';
+        state.currentView = 'database';
+        render();
+        window.scrollTo(0, 0);
+        document.getElementById('material-name')?.focus();
+        return;
       }
 
       if (action === 'save-product-type') {
@@ -4080,7 +4639,7 @@ Objetivo
         if (saved) {
           state.ui.providerReturn = false;
           state.ui.databaseMobileView = 'new';
-          state.ui.databaseDraft = { ...(state.ui.databaseDraft || {}), provider: saved.name, supplierContact: providerContactText(saved) };
+          state.ui.databaseDraft = { ...(state.ui.databaseDraft || {}), provider: saved.name, supplierContact: providerContactText(saved), supplierAddress: providerAddressText(saved) || state.ui.databaseDraft?.supplierAddress || '' };
           render();
           window.scrollTo(0, 0);
         }
@@ -4125,12 +4684,13 @@ Objetivo
         exportAllBases();
       }
 
+      // La fecha del último respaldo completo se anota solo si el archivo se guardó.
       if (action === 'export-all-bases-zip') {
-        exportAllBasesAsZip();
+        exportAllBasesAsZip().then((saved) => { if (saved) { state.ui.lastFullBackupAt = new Date().toISOString(); render(); } });
       }
 
       if (action === 'export-full-database') {
-        exportFullDatabase();
+        exportFullDatabase().then((saved) => { if (saved) { state.ui.lastFullBackupAt = new Date().toISOString(); render(); } });
       }
 
       if (action === 'import-all-bases' || action === 'import-full-database') {
@@ -4175,6 +4735,58 @@ Objetivo
         return;
       }
 
+      if (action === 'toggle-attendance-order') {
+        const orderId = String(actionBtn.dataset.id || '');
+        if (!orderId) return;
+        const session = state.attendance?.activeSession;
+        if (session) {
+          allocateSessionOrderTime(session);
+          session.orderIds = session.orderIds.includes(orderId) ? session.orderIds.filter((id) => id !== orderId) : [...session.orderIds, orderId];
+          stampBaseUpdate('attendance', { silent: true });
+        } else {
+          const current = (state.ui.attendanceOrderIds || []).map(String);
+          state.ui.attendanceOrderIds = current.includes(orderId) ? current.filter((id) => id !== orderId) : [...current, orderId];
+        }
+        render();
+        return;
+      }
+
+      if (action === 'start-machine-timer') {
+        const machine = String(document.getElementById('machine-name')?.value || '').trim();
+        const orderId = String(document.getElementById('machine-order')?.value || '');
+        if (!machine) { window.alert('Escribe qué máquina vas a cronometrar (por ejemplo: Láser CO2).'); return; }
+        state.attendance.machineTimers = normalizeMachineTimers(state.attendance.machineTimers);
+        state.attendance.machineTimers.push({ id: uid('mach'), machine, orderId, startAt: new Date().toISOString() });
+        state.ui.lastMachineName = machine;
+        stampBaseUpdate('attendance', { silent: true });
+        logActivity(`Máquina en marcha: ${machine}${orderId ? ` · ${findOrderById(orderId)?.orderNumber || ''}` : ''}`);
+        render();
+        return;
+      }
+
+      if (action === 'stop-machine-timer') {
+        const timers = normalizeMachineTimers(state.attendance?.machineTimers);
+        const timer = timers.find((item) => item.id === actionBtn.dataset.id);
+        if (!timer) return;
+        const endAt = new Date().toISOString();
+        state.attendance.machineTimers = timers.filter((item) => item.id !== timer.id);
+        state.attendance.machineRecords = normalizeMachineRecords(state.attendance.machineRecords);
+        state.attendance.machineRecords.unshift({ ...timer, id: uid('mach-rec'), endAt, ms: Math.max(0, new Date(endAt) - new Date(timer.startAt)) });
+        stampBaseUpdate('attendance', { silent: true });
+        logActivity(`Máquina detenida: ${timer.machine}`);
+        render();
+        return;
+      }
+
+      if (action === 'delete-machine-record') {
+        if (!confirmSafe('¿Eliminar este registro de máquina?')) return;
+        state.attendance.machineRecords = normalizeMachineRecords(state.attendance.machineRecords).filter((item) => item.id !== actionBtn.dataset.id);
+        stampBaseUpdate('attendance', { silent: true });
+        logActivity('Registro de máquina eliminado');
+        render();
+        return;
+      }
+
       if (action === 'check-in-attendance') {
         state.attendance = state.attendance || { activeSession: null, records: [] };
         state.attendance.records = state.attendance.records || [];
@@ -4205,7 +4817,10 @@ Objetivo
           pauseCount: 0,
           workedAccumulatedMs: 0,
           activeWorkStartedAt: nowIso,
-          workSegments: []
+          workSegments: [],
+          orderIds: (state.ui.attendanceOrderIds || []).map(String),
+          orderTimeMs: {},
+          orderAllocSince: nowIso
         };
         stampBaseUpdate('attendance', { silent: true });
         logActivity(`Se inició un turno: ${employee}`);
@@ -4229,6 +4844,7 @@ Objetivo
         activeSession.workSegments = Array.isArray(activeSession.workSegments) ? activeSession.workSegments : [];
         activeSession.pausedAccumulatedMs = Math.max(0, Number(activeSession.pausedAccumulatedMs) || 0);
         activeSession.pauseCount = Math.max(0, Number(activeSession.pauseCount) || 0);
+        allocateSessionOrderTime(activeSession, nowMs);
 
         if (activeSession.isPaused) {
           const pauseStartedMs = new Date(activeSession.pauseStartedAt || '').getTime();
@@ -4276,6 +4892,7 @@ Objetivo
 
         activeSession.workSegments = Array.isArray(activeSession.workSegments) ? activeSession.workSegments : [];
         let pausedAccumulatedMs = Math.max(0, Number(activeSession.pausedAccumulatedMs) || 0);
+        allocateSessionOrderTime(activeSession, checkOutMs);
 
         if (activeSession.isPaused && activeSession.pauseStartedAt) {
           const pauseStartedMs = new Date(activeSession.pauseStartedAt).getTime();
@@ -4309,6 +4926,7 @@ Objetivo
           workSegments: activeSession.workSegments
             .filter((seg) => seg && seg.startAt && seg.endAt)
             .map((seg) => ({ startAt: seg.startAt, endAt: seg.endAt })),
+          orderTimeMs: Object.fromEntries(Object.entries(activeSession.orderTimeMs || {}).map(([id, ms]) => [id, Math.round(ms)])),
           comments: comments || activeSession.comments || ''
         });
         state.attendance.activeSession = null;
@@ -4417,7 +5035,7 @@ Objetivo
       if (action === 'save-all-bases-now') {
         const baseKeys = ['scenario', 'database', 'productTypes', 'external', 'contacts', 'orders', 'desired', 'expenses', 'attendance', 'finance'];
         baseKeys.forEach((key) => stampBaseUpdate(key, { silent: true }));
-        logActivity('Se guardaron todas las bases de datos');
+        logActivity('Se guardaron todas las bases de datos', { undoable: false });
         triggerSaveFeedback('backup', null);
       }
 
@@ -4827,13 +5445,126 @@ Objetivo
       if (action === 'clear-desired-form') {
         state.ui.editingDesiredId = null;
         state.ui.desiredDraft = defaultDesiredDraft();
+        state.ui.desiredFormOpen = true;
         render();
+      }
+
+      if (action === 'open-desired-form') {
+        state.ui.editingDesiredId = null;
+        state.ui.desiredDraft = defaultDesiredDraft();
+        state.ui.desiredFormOpen = true;
+        state.ui.inventoryTab = 'equip';
+        render();
+        return;
+      }
+
+      if (action === 'close-desired-form') {
+        state.ui.editingDesiredId = null;
+        state.ui.desiredDraft = defaultDesiredDraft();
+        state.ui.desiredFormOpen = false;
+        render();
+        return;
+      }
+
+      if (action === 'equipment-maintenance-done') {
+        const current = (state.inventory.desiredItems || []).find((item) => item.id === actionBtn.dataset.id);
+        if (!current) return;
+        current.lastMaintenanceDate = toLocalDateValue(new Date());
+        if (state.ui.editingDesiredId === current.id && state.ui.desiredDraft) state.ui.desiredDraft.lastMaintenanceDate = current.lastMaintenanceDate;
+        stampBaseUpdate('desired', { silent: true });
+        logActivity(`Mantención hecha: ${current.name}`);
+        render();
+        return;
+      }
+
+      if (action === 'set-inventory-tab') {
+        state.ui.inventoryTab = actionBtn.dataset.tab === 'wish' ? 'wish' : 'equip';
+        render();
+        return;
+      }
+
+      if (action === 'select-wish-item') {
+        collectWishForm();
+        state.ui.selectedWishId = actionBtn.dataset.id || null;
+        render();
+        return;
+      }
+
+      if (action === 'new-wish-item') {
+        collectWishForm();
+        state.inventory.wishItems = state.inventory.wishItems || [];
+        const item = normalizeWishItem({ name: 'Nueva compra', priority: 'media', offers: [{ store: '', url: '', price: 0 }] });
+        state.inventory.wishItems.unshift(item);
+        state.ui.selectedWishId = item.id;
+        state.ui.inventoryTab = 'wish';
+        stampBaseUpdate('desired', { silent: true });
+        render();
+        document.getElementById('wish-name')?.select();
+        return;
+      }
+
+      if (action === 'add-wish-offer') {
+        const item = collectWishForm();
+        if (!item) return;
+        item.offers.push({ id: uid('woff'), store: '', url: '', price: 0 });
+        render();
+        return;
+      }
+
+      if (action === 'remove-wish-offer') {
+        const item = collectWishForm();
+        if (!item) return;
+        item.offers = item.offers.filter((offer) => offer.id !== actionBtn.dataset.offerId);
+        render();
+        return;
+      }
+
+      if (action === 'save-wish-item') {
+        const item = collectWishForm();
+        if (!item) return;
+        stampBaseUpdate('desired', { silent: true });
+        logActivity(`Lista de compras: ${item.name}`);
+        render();
+        return;
+      }
+
+      if (action === 'delete-wish-item') {
+        const item = getSelectedWishItem();
+        if (!item || !confirmSafe(`¿Quitar "${item.name}" de la lista de compras?`)) return;
+        state.inventory.wishItems = state.inventory.wishItems.filter((wish) => wish.id !== item.id);
+        state.ui.selectedWishId = state.inventory.wishItems[0]?.id || null;
+        stampBaseUpdate('desired', { silent: true });
+        logActivity(`Quitado de la lista de compras: ${item.name}`);
+        render();
+        return;
+      }
+
+      if (action === 'buy-wish-item') {
+        // Pasa la compra a Equipos y abre Finanzas con el egreso de Herramientas armado.
+        const item = collectWishForm();
+        if (!item) return;
+        const best = getBestWishOffer(item);
+        if (!confirmSafe(`¿Registrar la compra de "${item.name}"${best ? ` en ${best.store || 'la mejor oferta'} por ${formatCurrency(best.price)}` : ''}? Pasará a Equipos del taller.`)) return;
+        const today = toLocalDateValue(new Date());
+        state.inventory.desiredItems = state.inventory.desiredItems || [];
+        state.inventory.desiredItems.unshift(normalizeDesiredItem({ name: item.name, status: 'Nuevo', purchaseDate: today, supplier: best?.store || '', cost: best?.price || 0, notes: item.why }));
+        state.inventory.wishItems = state.inventory.wishItems.filter((wish) => wish.id !== item.id);
+        state.ui.selectedWishId = state.inventory.wishItems[0]?.id || null;
+        stampBaseUpdate('desired', { silent: true });
+        logActivity(`Comprado: ${item.name}`);
+        state.ui.financeEditingEntryId = null;
+        state.ui.financeDraft = createFinanceEntry({ category: 'Herramientas', title: item.name, detail: best?.store || '', expense: best?.price || 0, date: today });
+        state.ui.financeTab = 'mov';
+        state.currentView = 'finance';
+        render();
+        return;
       }
 
       if (action === 'edit-desired-item') {
         const current = (state.inventory.desiredItems || []).find((item) => item.id === actionBtn.dataset.id);
         if (!current) return;
         state.ui.editingDesiredId = current.id;
+        state.ui.desiredFormOpen = true;
         state.ui.desiredDraft = JSON.parse(JSON.stringify(current));
         if (!(state.ui.desiredDraft.offers || []).length) {
           state.ui.desiredDraft.offers = [{ id: uid('off'), price: 0, link: '', entryDate: new Date().toISOString().slice(0, 10) }];
@@ -4896,7 +5627,7 @@ Objetivo
         state.currentView = 'database';
         state.ui.databaseMobileView = 'new';
         render();
-        window.scrollTo(0, 0);
+        if (!isSplitFichaLayout()) window.scrollTo(0, 0);
       }
 
       if (action === 'duplicate-material') {
@@ -4937,6 +5668,7 @@ Objetivo
       if (action === 'cancel-edit-material') {
         state.ui.editingMaterialId = null;
         state.ui.databaseDraft = null;
+        state.ui.databaseFormOpen = false;
         state.ui.databaseMobileView = 'table';
         render();
       }
@@ -4999,6 +5731,13 @@ Objetivo
     });
 
     document.addEventListener('keydown', (event) => {
+      // Ctrl/Cmd + Z fuera de campos de texto: deshace la última acción registrada.
+      if ((event.ctrlKey || event.metaKey) && !event.shiftKey && String(event.key).toLowerCase() === 'z'
+        && !event.target.closest?.('input, textarea, select, [contenteditable="true"]') && undoStack.length) {
+        event.preventDefault();
+        undoLastAction();
+        return;
+      }
       if (event.key === 'Escape' && refs.newMenu && !refs.newMenu.classList.contains('is-hidden')) {
         setNewMenuOpen(false);
         return;
@@ -5224,6 +5963,14 @@ Objetivo
       const target = event.target;
       if (!target || target.tagName === 'TEXTAREA' || target.type === 'file') return;
 
+      // Enter en el buscador del presupuestador agrega la primera coincidencia.
+      if (target.id === 'quote-mat-search') {
+        event.preventDefault();
+        const first = searchQuoteMaterials(target.value)[0];
+        if (first) document.querySelector(`#quote-mat-results [data-action="quick-add-material"][data-id="${first.id}"]`)?.click();
+        return;
+      }
+
       const shouldCommitOnEnter = Boolean(
         target.dataset.model
         || target.dataset.collection
@@ -5399,6 +6146,7 @@ Objetivo
         if (key === 'baseYear') {
           value = String(value || '').replace(/[^0-9]/g, '').slice(0, 4);
         }
+        if (key === 'dueDay' || key === 'firstDueMonth') value = Number(value) || 0;
         if (key === 'period') {
           const currentEntries = Array.isArray(state.ui.expenseDraft.entries) ? state.ui.expenseDraft.entries : [];
           const entriesToDrop = currentEntries.slice(getExpenseEntryCount(value));
@@ -5429,7 +6177,7 @@ Objetivo
           triggerSaveFeedback('expenses', 'expenses');
         }, 900);
         // Only re-render for structural fields; text inputs just update state without destroying focus
-        if (key === 'period' || key === 'expenseType') render();
+        if (key === 'period' || key === 'expenseType' || key === 'dueDay' || key === 'firstDueMonth') render();
         return;
       }
 
@@ -5612,6 +6360,20 @@ Objetivo
         return;
       }
 
+      if (target.dataset.lineDim) {
+        // Medidas de piezas: con ancho, alto y piezas la cantidad (cm²) se calcula sola.
+        const row = state.quote.materials.find((item) => item.id === target.dataset.id);
+        if (!row) return;
+        row[target.dataset.lineDim] = Math.max(0, Number(target.value) || 0);
+        const w = Number(row.pieceWidthCm) || 0;
+        const h = Number(row.pieceHeightCm) || 0;
+        const n = Number(row.pieceCount) || 0;
+        if (w > 0 && h > 0 && n > 0) row.quantity = Number((w * h * n).toFixed(2));
+        render();
+        const next = document.querySelector(`[data-line-dim="${target.dataset.lineDim}"][data-id="${row.id}"]`);
+        return void next;
+      }
+
       if (target.dataset.collection) {
         updateCollectionItem(target.dataset.collection, target.dataset.id, target.dataset.key, parseValue(target));
 
@@ -5685,6 +6447,13 @@ Objetivo
     });
 
     document.addEventListener('input', (event) => {
+      if (event.target?.id === 'quote-mat-search') {
+        // Solo se repinta la lista de resultados para no perder el foco del buscador.
+        state.ui.quoteMatQuery = event.target.value;
+        const box = document.getElementById('quote-mat-results');
+        if (box) box.innerHTML = renderQuoteMaterialResults(event.target.value);
+        return;
+      }
       if (event.target?.id === 'notes-general-input') {
         handleNotesEditorInput();
       }
@@ -6242,6 +7011,7 @@ Objetivo
 
     state.ui.editingMaterialId = null;
     state.ui.databaseDraft = null;
+    state.ui.databaseFormOpen = false;
     state.ui.databaseFilter = 'Todos';
     state.ui.databaseMobileView = 'table';
     stampBaseUpdate('database');
@@ -6296,6 +7066,8 @@ Objetivo
     const facebook = String(draft.facebook || '').trim();
     const email = String(draft.email || '').trim();
     const website = String(draft.website || '').trim();
+    const address = String(draft.address || '').trim();
+    const district = String(draft.district || '').trim();
     const status = draft.status === 'Inactivo' ? 'Inactivo' : 'Activo';
 
     if (!name) {
@@ -6312,6 +7084,8 @@ Objetivo
       facebook,
       email,
       website,
+      address,
+      district,
       status,
       createdAt: draft.createdAt || new Date().toLocaleDateString('es-CL')
     };
@@ -6359,6 +7133,8 @@ Objetivo
       imageMimeType: draft.imageMimeType || '',
       imageSizeKb: Number(draft.imageSizeKb || 0) || 0,
       expanded: false,
+      maintenanceEveryDays: Math.max(0, Number(draft.maintenanceEveryDays) || 0),
+      lastMaintenanceDate: String(draft.lastMaintenanceDate || ''),
       offers: (draft.offers || []).map((offer) => ({
         id: offer.id || uid('off'),
         price: Number(offer.price || 0) || 0,
@@ -6377,6 +7153,7 @@ Objetivo
 
     state.ui.editingDesiredId = null;
     state.ui.desiredDraft = defaultDesiredDraft();
+    state.ui.desiredFormOpen = false;
     stampBaseUpdate('database');
     stampBaseUpdate('desired');
     render();
@@ -6467,7 +7244,8 @@ Objetivo
     const payload = {
       app: 'AndiApp',
       exportedAt: new Date().toISOString(),
-      desiredItems: state.inventory.desiredItems || []
+      desiredItems: state.inventory.desiredItems || [],
+      wishItems: state.inventory.wishItems || []
     };
     downloadBlobFile(new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' }), getBackupFileName('desired'));
   }
@@ -6564,6 +7342,7 @@ Objetivo
       }
 
       state.inventory.desiredItems = source.map(normalizeDesiredItem).filter((item) => item.name);
+      if (Array.isArray(parsed?.wishItems)) state.inventory.wishItems = parsed.wishItems.map(normalizeWishItem).filter((item) => item.name);
 
       stampBaseUpdate('desired');
       render();
@@ -6598,7 +7377,8 @@ Objetivo
           activeWorkStartedAt: attendance.activeSession.activeWorkStartedAt || attendance.activeSession.checkInAt || null,
           workSegments: (Array.isArray(attendance.activeSession.workSegments) ? attendance.activeSession.workSegments : [])
             .filter((seg) => seg && seg.startAt)
-            .map((seg) => ({ startAt: seg.startAt, endAt: seg.endAt || null }))
+            .map((seg) => ({ startAt: seg.startAt, endAt: seg.endAt || null })),
+          ...normalizeSessionOrderFields(attendance.activeSession)
         }
         : null;
 
@@ -6616,9 +7396,12 @@ Objetivo
         workSegments: (Array.isArray(item.workSegments) ? item.workSegments : [])
           .filter((seg) => seg && seg.startAt && seg.endAt)
           .map((seg) => ({ startAt: seg.startAt, endAt: seg.endAt })),
+        orderTimeMs: normalizeOrderTimeMap(item.orderTimeMs),
         comments: String(item.comments || '')
       })).filter((item) => item.employeeName && item.checkInAt && item.checkOutAt);
 
+      state.attendance.machineTimers = normalizeMachineTimers(attendance.machineTimers);
+      state.attendance.machineRecords = normalizeMachineRecords(attendance.machineRecords);
       state.ui.attendanceEditingId = null;
       stampBaseUpdate('attendance');
       render();
@@ -6711,6 +7494,7 @@ Objetivo
 
     state.ui.editingContactId = null;
     state.ui.contactDraft = null;
+    state.ui.contactFormOpen = false;
     state.ui.contactsMobileView = 'agenda';
     stampBaseUpdate('contacts');
     render();
@@ -6746,9 +7530,9 @@ Objetivo
         const writable = await picker.createWritable();
         await writable.write(blob);
         await writable.close();
-        return;
+        return true;
       } catch (error) {
-        if (error?.name === 'AbortError') return;
+        if (error?.name === 'AbortError') return false;
         console.warn('No se pudo guardar con selector de ubicación, se usará descarga estándar.', error);
       }
     }
@@ -6759,6 +7543,7 @@ Objetivo
     link.download = safeName;
     link.click();
     URL.revokeObjectURL(url);
+    return true;
   }
 
   function buildCurrentOrderRecord() {
@@ -7946,7 +8731,7 @@ Objetivo
       },
       {
         filename: getBackupFileName('desired'),
-        payload: { app: 'AndiApp', exportedAt, desiredItems: state.inventory.desiredItems || [] }
+        payload: { app: 'AndiApp', exportedAt, desiredItems: state.inventory.desiredItems || [], wishItems: state.inventory.wishItems || [] }
       },
       {
         filename: getBackupFileName('attendance'),
@@ -8096,7 +8881,8 @@ Objetivo
           payload: {
             app: 'AndiApp',
             exportedAt,
-            desiredItems: state.inventory.desiredItems || []
+            desiredItems: state.inventory.desiredItems || [],
+            wishItems: state.inventory.wishItems || []
           }
         },
         {
@@ -8136,11 +8922,14 @@ Objetivo
         compressionOptions: { level: 6 }
       });
 
-      downloadBlobFile(blob, zipName);
+      const saved = await downloadBlobFile(blob, zipName);
+      if (!saved) return false;
       window.alert(`Respaldo ZIP generado correctamente (${files.length} bases).`);
+      return true;
     } catch (error) {
       console.error(error);
       window.alert('No se pudo generar el archivo ZIP de respaldo.');
+      return false;
     }
   }
 
@@ -8148,7 +8937,7 @@ Objetivo
   // Se excluye 'ui' (banderas efímeras: filtros, borradores, tema).
   const FULL_DB_BRANCHES = ['scenario', 'quote', 'database', 'contacts', 'orders', 'inventory', 'expenses', 'attendance', 'finance'];
 
-  function exportFullDatabase() {
+  async function exportFullDatabase() {
     const exportedAt = new Date().toISOString();
     const token = getBackupDateToken(new Date());
     const snapshot = {};
@@ -8162,11 +8951,13 @@ Objetivo
       exportedAt,
       state: snapshot
     };
-    downloadBlobFile(
+    const saved = await downloadBlobFile(
       new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' }),
       `BASE_COMPLETA_${token}_ANDIAPP.json`
     );
+    if (!saved) return false;
     window.alert('Se descargó la BASE DE DATOS COMPLETA de la app en un solo archivo (incluye Inventario y todas las secciones).');
+    return true;
   }
 
   // Aplica un snapshot de base completa sobre el estado vivo (mutación in situ)
@@ -8487,6 +9278,7 @@ Objetivo
 
       if (Array.isArray(parsed?.desiredItems)) {
         state.inventory.desiredItems = parsed.desiredItems.map(normalizeDesiredItem).filter((item) => item.name);
+        if (Array.isArray(parsed?.wishItems)) state.inventory.wishItems = parsed.wishItems.map(normalizeWishItem).filter((item) => item.name);
         desiredUpdated = true;
       }
 
@@ -8506,7 +9298,8 @@ Objetivo
             activeWorkStartedAt: sourceAttendance.activeSession.activeWorkStartedAt || sourceAttendance.activeSession.checkInAt || null,
             workSegments: (Array.isArray(sourceAttendance.activeSession.workSegments) ? sourceAttendance.activeSession.workSegments : [])
               .filter((seg) => seg && seg.startAt)
-              .map((seg) => ({ startAt: seg.startAt, endAt: seg.endAt || null }))
+              .map((seg) => ({ startAt: seg.startAt, endAt: seg.endAt || null })),
+          ...normalizeSessionOrderFields(sourceAttendance.activeSession)
           }
           : null;
 
@@ -8524,9 +9317,12 @@ Objetivo
           workSegments: (Array.isArray(item.workSegments) ? item.workSegments : [])
             .filter((seg) => seg && seg.startAt && seg.endAt)
             .map((seg) => ({ startAt: seg.startAt, endAt: seg.endAt })),
+          orderTimeMs: normalizeOrderTimeMap(item.orderTimeMs),
           comments: String(item.comments || '')
         })).filter((item) => item.employeeName && item.checkInAt && item.checkOutAt);
 
+        state.attendance.machineTimers = normalizeMachineTimers(sourceAttendance.machineTimers);
+        state.attendance.machineRecords = normalizeMachineRecords(sourceAttendance.machineRecords);
         state.ui.attendanceEditingId = null;
         attendanceUpdated = true;
       }
@@ -8975,10 +9771,12 @@ Objetivo
     window.ERMStorage.save(state);
     const calc = window.ERMCalc.calculateQuote(state);
     renderTabs();
+    renderSidebarLinks();
     renderMain(calc);
     renderSummary(calc);
     renderInlinePdfViewerModal();
     syncAttendanceChronometer();
+    syncLiveTimers();
     renderActivityLog();
     if (state.currentView === 'orders') {
       fitOrdersLayout();
@@ -9016,9 +9814,9 @@ Objetivo
   }
 
   const VIEW_TITLES = {
-    'mobile-home': 'AndiApp', quote: 'Presupuestador', orders: 'Panel OT', database: 'Base de datos', contacts: 'Clientes',
+    'mobile-home': 'AndiApp', home: 'Inicio', quote: 'Presupuestador', orders: 'Panel OT', database: 'Base de datos', contacts: 'Clientes',
     finance: 'Finanzas', expenses: 'Gastos', attendance: 'Asistencia', inventory: 'Inventario', scenario: 'Escenario',
-    backup: 'Respaldo', docs: 'Ayuda técnica', summary: 'Resumen'
+    backup: 'Respaldo', docs: 'Ayuda técnica', summary: 'Resumen', links: 'Enlaces'
   };
 
   function renderTabs() {
@@ -9050,6 +9848,8 @@ Objetivo
     const preFocusValue    = preFocus?.value           ?? null;
 
     if (state.currentView === 'mobile-home') refs.mainPanel.innerHTML = renderMobileHome();
+    if (state.currentView === 'home') refs.mainPanel.innerHTML = renderHome();
+    if (state.currentView === 'links') refs.mainPanel.innerHTML = renderLinks();
     if (state.currentView === 'scenario') refs.mainPanel.innerHTML = renderScenario(calc);
     if (state.currentView === 'quote') refs.mainPanel.innerHTML = renderQuote(calc);
     if (state.currentView === 'database') refs.mainPanel.innerHTML = renderDatabase();
@@ -9128,6 +9928,12 @@ Objetivo
         </div>`;
     }).join('');
 
+    const summaryParts = [['mat', summary.materialsTotal], ['mo', summary.laborTotal], ['cif', summary.cifTotal], ['log', summary.logisticsTotal]].map(([key, value]) => [key, Number(value) || 0]);
+    const summaryPartsTotal = summaryParts.reduce((acc, item) => acc + item[1], 0);
+    const summaryCostBar = summaryPartsTotal > 0
+      ? `<div class="ot-composition-bar summary-cost-bar" role="img" aria-label="Composición del costo">${summaryParts.filter((item) => item[1] > 0).map(([key, value]) => `<span class="cost-${key}" style="width:${(value / summaryPartsTotal * 100).toFixed(2)}%"></span>`).join('')}</div>`
+      : '';
+
     refs.summaryPanel.innerHTML = `
       <div class="card summary-main-card ${selectedMeta.className} ${marginAchievement.tone === 'gold' ? 'summary-sheen' : ''}">
         <div class="section-title">
@@ -9136,11 +9942,12 @@ Objetivo
         </div>
 
         <div class="summary-block-title">Costos${qty > 1 ? ` · ${qty} unidades` : ''}</div>
-        <div class="summary-row"><span>Materia prima</span><strong>${formatCurrency(summary.materialsTotal)}</strong></div>
-        <div class="summary-row"><span>Mano de obra</span><strong>${formatCurrency(summary.laborTotal)}</strong></div>
-        <div class="summary-row"><span>CIF operativos</span><strong>${formatCurrency(summary.cifCashTotal)}</strong></div>
-        ${hasRent ? `<div class="summary-row"><span>Arriendo (${rentPercent}%)</span><strong>${formatCurrency(summary.cifRentTotal)}</strong></div>` : ''}
-        ${(summary.logisticsTotal || 0) > 0 ? `<div class="summary-row"><span>Logística</span><strong>${formatCurrency(summary.logisticsTotal)}</strong></div>` : ''}
+        ${summaryCostBar}
+        <div class="summary-row"><span><i class="cost-dot cost-mat"></i>Materia prima</span><strong>${formatCurrency(summary.materialsTotal)}</strong></div>
+        <div class="summary-row"><span><i class="cost-dot cost-mo"></i>Mano de obra</span><strong>${formatCurrency(summary.laborTotal)}</strong></div>
+        <div class="summary-row"><span><i class="cost-dot cost-cif"></i>CIF operativos</span><strong>${formatCurrency(summary.cifCashTotal)}</strong></div>
+        ${hasRent ? `<div class="summary-row"><span><i class="cost-dot cost-cif"></i>Arriendo (${rentPercent}%)</span><strong>${formatCurrency(summary.cifRentTotal)}</strong></div>` : ''}
+        ${(summary.logisticsTotal || 0) > 0 ? `<div class="summary-row"><span><i class="cost-dot cost-log"></i>Logística</span><strong>${formatCurrency(summary.logisticsTotal)}</strong></div>` : ''}
         <div class="summary-row summary-row-total"><span>Costo total</span><strong>${formatCurrency(summary.totalCost)}</strong></div>
 
         <div class="summary-block-title">${sanitize(selectedMeta.label)}</div>
@@ -9191,9 +9998,9 @@ Objetivo
       checks.push({ key: 'margin', tone: 'bad', text: `Pierdes plata real: el precio no alcanza a cubrir materiales, sueldo y gastos operativos. Faltan ${formatCurrency(cashFloor - price)} netos.` });
     } else if ((Number(summary.contribution) || 0) < 0) {
       checks.push({ key: 'margin', tone: 'caution', text: `Cubres los costos reales, pero no todo el arriendo cargado: dejas de ganar ${formatCurrency(-summary.contribution)} de costo de oportunidad.` });
-    } else if (margin < minMargin) {
+    } else if (margin + 1e-6 < minMargin) { // 1e-6: tolera el redondeo a pesos del precio mínimo
       checks.push({ key: 'margin', tone: 'bad', text: `Utilidad de ${formatPercent(margin)}: bajo el mínimo de ${formatPercent(minMargin)}. El precio mínimo es ${formatCurrency(summary.minimumNet)} neto.` });
-    } else if (margin < idealMargin) {
+    } else if (margin + 1e-6 < idealMargin) {
       checks.push({ key: 'margin', tone: 'caution', text: `Utilidad de ${formatPercent(margin)}: cumple el mínimo, pero está bajo el ideal de ${formatPercent(idealMargin)} (${formatCurrency(summary.idealNet)} neto).` });
     } else {
       checks.push({ key: 'margin', tone: 'ok', text: `Utilidad de ${formatPercent(margin)}: cumple el ideal de ${formatPercent(idealMargin)}.` });
@@ -9381,15 +10188,14 @@ Objetivo
       `;
     }).join('');
 
-    return `
-      <fieldset class="scenario-edit-area" ${lockAttr}>
+    // Escenario en pestañas: los indicadores quedan siempre arriba; las pestañas quedan fuera del
+    // <fieldset> para que sigan funcionando con el escenario bloqueado.
+    const scenarioTabs = [['time', 'Tiempo y márgenes'], ['cif', 'Costos fijos (CIF)'], ['team', 'Equipo y sueldos'], ['proj', 'Proyección y metas']];
+    const scenarioTab = scenarioTabs.some((item) => item[0] === state.ui.scenarioTab) ? state.ui.scenarioTab : 'time';
+    const scenarioBlocks = {
+      time: `
       <div class="card">
-        <div class="section-title">
-          <div>
-            <h2>Escenario base</h2>
-            <p class="subtitle">Aquí defines el contexto económico del período para calcular tasas confiables por hora.</p>
-          </div>
-        </div>
+        <div class="section-title"><div><h3>Tiempo, márgenes e IVA</h3><p class="subtitle">Duración del período, eficiencia real y los márgenes que usa el presupuestador.</p></div></div>
 
         <div class="grid-2">
           <div>
@@ -9420,6 +10226,8 @@ Objetivo
         <p class="help">Las tasas se calculan sobre horas productivas reales, no sobre horas teóricas. Así evitas cotizar por debajo del costo real de tu empresa. Para una operación de una sola persona, partir entre 70% y 80% suele ser una base prudente.</p>
       </div>
 
+`,
+      cif: `
       <div class="card">
         <div class="section-title">
           <div>
@@ -9461,6 +10269,8 @@ Objetivo
         </div>`}
       </div>
 
+`,
+      team: `
       <div class="card">
         <div class="section-title">
           <div>
@@ -9504,6 +10314,8 @@ Objetivo
         </div>`}
       </div>
 
+`,
+      proj: `
       <div class="card">
         <div class="section-title">
           <div>
@@ -9544,6 +10356,14 @@ Objetivo
             </label>
             <input type="text" min="0" step="10000" data-model="scenario.projection.targetMonthlyProfit" data-format="clp" value="${formatNumber(scenario.projection?.targetMonthlyProfit || 0)}" />
             ${(Number(scenario.periodMonths) || 1) > 1 ? `<div class="small">Utilidad objetivo del período (${Number(scenario.periodMonths)} meses): ${formatCurrency(projection.targetPeriodProfit)}</div>` : ''}
+          </div>
+          <div>
+            <label class="label-with-tip">
+              <span>Meta anual de ventas (opcional)</span>
+              ${renderInfoTip('Ventas netas (sin IVA) que quieres lograr este año. Déjala en 0 y la app usa la venta recomendada del escenario llevada a 12 meses. Se muestra como barra en Inicio y en el Panel OT.')}
+            </label>
+            <input type="text" min="0" step="100000" data-model="scenario.annualSalesGoal" data-format="clp" value="${formatNumber(scenario.annualSalesGoal || 0)}" />
+            <div class="small">${scenario.annualSalesGoal > 0 ? 'Meta fijada a mano.' : `Automática: ${formatCurrency(window.ERMCalc.annualSalesGoal(scenario).recommended)} al año.`}</div>
           </div>
         </div>
 
@@ -9597,20 +10417,6 @@ Objetivo
         <p class="help">
           Si mantienes un promedio de <strong>${scenario.projection?.avgHoursPerOrder || 6} horas por orden</strong>, tu capacidad del período es de aproximadamente <strong>${projection.equivalentOrdersCapacity.toFixed(1)} órdenes equivalentes</strong>. Al equilibrio, cada orden debería promediar cerca de <strong>${formatCurrency(projection.breakEvenAverageSalePerOrder)}</strong>. Para cumplir el margen mínimo, cerca de <strong>${formatCurrency(projection.minimumAverageSalePerOrder)}</strong>. Y para lograr tu utilidad objetivo del período, cerca de <strong>${formatCurrency(projection.targetAverageSalePerOrder)}</strong> netos.
         </p>
-      </div>
-
-      <div class="card scenario-indicators-card">
-        <div class="section-title">
-          <h3>Indicadores automáticos del escenario</h3>
-        </div>
-        <div class="kpi-grid">
-          <div class="kpi-box"><span>CIF totales del período</span><strong>${formatCurrency(calc.scenarioSummary.fixedCostsTotal)}</strong></div>
-          <div class="kpi-box"><span>Sueldos del período</span><strong>${formatCurrency(calc.scenarioSummary.payrollTotal)}</strong></div>
-          <div class="kpi-box"><span>Horas productivas</span><strong>${calc.scenarioSummary.availableHours.toFixed(1)} h</strong></div>
-          <div class="kpi-box"><span>Tasa CIF por hora</span><strong>${formatCurrency(calc.scenarioSummary.cifPerHour)}</strong></div>
-          <div class="kpi-box"><span>Valor hora base</span><strong>${formatCurrency(calc.scenarioSummary.laborReferenceRate)}</strong></div>
-          <div class="kpi-box"><span>Margen mínimo / ideal</span><strong>${formatPercent(scenario.minimumMargin)} / ${formatPercent(scenario.idealMargin)}</strong></div>
-        </div>
       </div>
 
       <div class="card scenario-goals-card">
@@ -9686,6 +10492,24 @@ Objetivo
           </table>
         </div>`}
       </div>
+`
+    };
+    return `
+      <div class="card">
+        ${renderPageHead('settings', 'Escenario', 'Contexto económico del período: con esto se calculan las tasas por hora, el CIF y el punto de equilibrio.')}
+        <div class="kpi-grid scenario-kpis">
+          <div class="kpi-box"><span>CIF totales del período</span><strong>${formatCurrency(calc.scenarioSummary.fixedCostsTotal)}</strong></div>
+          <div class="kpi-box"><span>Sueldos del período</span><strong>${formatCurrency(calc.scenarioSummary.payrollTotal)}</strong></div>
+          <div class="kpi-box"><span>Horas productivas</span><strong>${calc.scenarioSummary.availableHours.toFixed(1)} h</strong></div>
+          <div class="kpi-box"><span>Tasa CIF por hora</span><strong>${formatCurrency(calc.scenarioSummary.cifPerHour)}</strong></div>
+          <div class="kpi-box"><span>Valor hora base</span><strong>${formatCurrency(calc.scenarioSummary.laborReferenceRate)}</strong></div>
+          <div class="kpi-box"><span>Margen mínimo / ideal</span><strong>${formatPercent(scenario.minimumMargin)} / ${formatPercent(scenario.idealMargin)}</strong></div>
+        </div>
+        ${renderPageTabs(scenarioTabs, scenarioTab, 'set-scenario-tab', 'Secciones del Escenario')}
+      </div>
+
+      <fieldset class="scenario-edit-area" ${lockAttr}>
+      ${scenarioBlocks[scenarioTab]}
       </fieldset>
 
       <div class="card scenario-confirm-card">
@@ -9737,6 +10561,31 @@ Objetivo
 
   function isPrototypeOrder(order) {
     return Boolean(order?.isPrototype || order?.quote?.isPrototype || order?.status === 'Prototipo');
+  }
+
+  // Estado de cobro de una OT. Cruza los movimientos de Ventas ligados en Finanzas con el
+  // estado de la OT: "Entregado (pagado)", o entregada con boleta, cuenta como pagada aunque
+  // Finanzas no tenga el cobro. Prototipos y prospectos no suman en "por cobrar".
+  function getOrderPaymentStatus(order) {
+    const gross = Number(order?.quoteSummary?.effectiveGross || order?.priceGross || 0);
+    const entries = (state.finance?.entries || []).filter(
+      (e) => e.category === 'Ventas' && e.orderId && idsEqual(e.orderId, order?.id)
+    ).sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')));
+    const cobrado = entries.reduce((s, e) => s + (Number(e.income) || 0), 0);
+    const status = order?.status || 'Prospecto';
+    const deliveryState = order?.deliveryState || order?.quote?.deliveryState || 'Abierta';
+    const delivered = isDeliveryCompleted(deliveryState) || String(status).startsWith('Entregado');
+    const hasInvoice = Boolean(getPrimaryAttachment(order, legacyOrderInvoiceAttachment));
+    const missing = Math.max(0, gross - cobrado);
+    const base = { gross, cobrado, entries, missing, financeGap: 0 };
+    if (isPrototypeOrder(order)) return { ...base, kind: 'prototype', counts: false, paid: false, pending: 0 };
+    // Tolerancia de $1 por redondeos del IVA.
+    if (gross > 0 && missing <= 1) return { ...base, kind: 'paid', counts: true, paid: true, pending: 0 };
+    const paidByStatus = status === 'Entregado (pagado)'
+      || (delivered && hasInvoice && status !== 'Entregado (no pagado)');
+    if (paidByStatus) return { ...base, kind: 'paid-status', counts: true, paid: true, pending: 0, financeGap: missing };
+    if (status === 'Prospecto') return { ...base, kind: 'prospect', counts: false, paid: false, pending: missing };
+    return { ...base, kind: 'pending', counts: true, paid: false, pending: missing };
   }
 
   // Grupos de los círculos del Panel OT: los prototipos no cuentan como entregados ni pendientes.
@@ -10026,6 +10875,77 @@ Objetivo
     };
   }
 
+  // ---- Presupuestador: buscador de insumos y medidas por línea ----
+  function searchQuoteMaterials(query) {
+    const words = String(query || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').split(/\s+/).filter(Boolean);
+    if (!words.length) return [];
+    const plain = (text) => String(text || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    return (state.database.materials || [])
+      .filter((item) => item.status !== 'Inactivo')
+      .filter((item) => { const hay = plain(`${item.name} ${item.group} ${item.provider}`); return words.every((w) => hay.includes(w)); })
+      .slice(0, 8);
+  }
+
+  // Insumos más usados en las OT guardadas (para atajos "Frecuentes").
+  function getFrequentQuoteMaterials(limit = 5) {
+    const counts = {};
+    (state.orders || []).forEach((order) => (order.quote?.materials || []).forEach((line) => { if (line.materialId) counts[line.materialId] = (counts[line.materialId] || 0) + 1; }));
+    return Object.entries(counts).sort((a, b) => b[1] - a[1])
+      .map(([id]) => (state.database.materials || []).find((item) => item.id === id && item.status !== 'Inactivo'))
+      .filter(Boolean).slice(0, limit);
+  }
+
+  function renderQuoteMaterialResults(query) {
+    const results = searchQuoteMaterials(query);
+    if (!String(query || '').trim()) return '';
+    if (!results.length) return `<div class="quote-mat-empty">Sin coincidencias para "${sanitize(query)}". <button type="button" class="btn btn-soft btn-xs" data-action="open-material-form">Crear en Base de datos</button></div>`;
+    return results.map((item, index) => `
+      <button type="button" class="quote-mat-result ${index === 0 ? 'is-first' : ''}" data-action="quick-add-material" data-id="${sanitize(item.id)}">
+        <i class="cost-dot cost-mat"></i>
+        <span class="quote-mat-result-text"><strong>${sanitize(item.name)}</strong><span>${sanitize(item.group || '')}${item.provider ? ` · ${sanitize(item.provider)}` : ''} · ${renderCalculationUnitLabel(item.calculationUnit)}</span></span>
+        <span class="mono">${formatCurrencySmart(item.unitCost || 0)}</span>
+        <span class="quote-mat-add">+ Agregar</span>
+      </button>`).join('');
+  }
+
+  function addQuoteMaterialLine(materialId) {
+    const material = (state.database.materials || []).find((item) => item.id === materialId);
+    if (!material) return null;
+    const line = { id: uid('qlm'), group: material.group || '', materialId: material.id, quantity: material.calculationUnit === 'cm2' ? 0 : 1, wastePercent: 0, comment: '' };
+    state.quote.materials.push(line);
+    state.ui.quoteMatQuery = '';
+    state.ui.quoteOpenLineId = material.calculationUnit === 'cm2' ? line.id : null;
+    return line;
+  }
+
+  // Detalle de una línea por superficie: ancho × alto × piezas = cm², merma rápida y uso de la placa.
+  function renderQuoteLineDetail(line) {
+    const material = line.material;
+    const w = Number(line.pieceWidthCm) || '';
+    const h = Number(line.pieceHeightCm) || '';
+    const n = Number(line.pieceCount) || '';
+    const plateArea = (Number(material?.widthCm) || 0) * (Number(material?.heightCm) || 0);
+    const used = Number(line.effectiveQuantity) || 0;
+    const plateShare = plateArea > 0 ? used / plateArea : 0;
+    return `
+      <tr class="quote-line-detail-row"><td colspan="6">
+        <div class="quote-line-detail">
+          <div class="quote-line-dims">
+            <div><label title="Ancho de la pieza en cm">Ancho (cm)</label><input type="number" min="0" step="0.1" inputmode="decimal" data-line-dim="pieceWidthCm" data-id="${line.id}" value="${w}" /></div>
+            <div><label title="Alto de la pieza en cm">Alto (cm)</label><input type="number" min="0" step="0.1" inputmode="decimal" data-line-dim="pieceHeightCm" data-id="${line.id}" value="${h}" /></div>
+            <div><label>Piezas</label><input type="number" min="0" step="1" inputmode="numeric" data-line-dim="pieceCount" data-id="${line.id}" value="${n}" /></div>
+            <div class="quote-line-waste"><label>Merma</label><div class="quote-waste-chips">${[0, 5, 10, 15, 20].map((v) => `<button type="button" class="quote-waste-chip ${Number(line.wastePercent) === v ? 'active' : ''}" data-action="set-line-waste" data-id="${line.id}" data-waste="${v}">${v} %</button>`).join('')}</div></div>
+          </div>
+          <div class="quote-line-plate">
+            <span class="ot-preview-section-title">Uso de la placa${plateArea ? ` ${formatNumber(material.widthCm, 0, 1)} × ${formatNumber(material.heightCm, 0, 1)} cm` : ''}</span>
+            ${plateArea ? `<div class="quote-plate-bar" role="img" aria-label="Usa ${formatPercent(plateShare)} de la placa"><span style="width:${Math.min(100, plateShare * 100).toFixed(1)}%"></span></div>
+            <span class="mono small">${formatNumber(used, 0, 1)} cm² con merma · ${formatPercent(plateShare)} de una placa${plateShare > 1 ? ` (≈ ${Math.ceil(plateShare)} placas)` : ''}</span>` : '<span class="small">El insumo no tiene medidas de placa en Base de datos.</span>'}
+            <span class="small">Cantidad = ancho × alto × piezas. También puedes escribir los cm² directo en la tabla.</span>
+          </div>
+        </div>
+      </td></tr>`;
+  }
+
   function renderQuote(calc) {
     const { quote, scenario, database } = state;
     normalizeQuotePrototypeState(quote);
@@ -10043,6 +10963,7 @@ Objetivo
     const materialRows = calc.quoteSummary.materialLines.map((line) => {
       const currentGroup = line.group || line.material?.group || materialGroups[0] || '';
       const wastePercent = Number(line.wastePercent) || 0;
+      const isOpen = line.material?.calculationUnit === 'cm2' && state.ui.quoteOpenLineId === line.id;
 
       const formulaInfo = line.material
         ? `Precio base: ${formatCurrencySmart(line.material.baseCost || 0)} · Factor: ${renderCalculationUnitLabel(line.material.calculationUnit)} · ${line.material.formulaSummary || ''}`
@@ -10050,20 +10971,20 @@ Objetivo
 
       return `
         <tr>
-          <td class="group-dropdown-cell">
+          <td class="group-dropdown-cell" data-label="Grupo">
             <button type="button" class="btn btn-soft picker-trigger-btn" data-action="open-material-group-picker" data-row-id="${line.id}" title="${sanitize(currentGroup || 'Selecciona grupo')}">
               <span class="picker-trigger-label">${sanitize(currentGroup || 'Selecciona grupo')}</span>
               <span class="picker-trigger-caret" aria-hidden="true">▾</span>
             </button>
           </td>
-          <td class="insumo-cell">
+          <td class="insumo-cell" data-label="Insumo">
             <button type="button" class="btn btn-soft picker-trigger-btn" data-action="open-material-option-picker" data-row-id="${line.id}" title="${sanitize(line.material?.name || 'Selecciona insumo')}">
               <span class="picker-trigger-label">${sanitize(line.material?.name || 'Selecciona insumo')}</span>
               <span class="picker-trigger-caret" aria-hidden="true">▾</span>
             </button>
             <div class="small">${sanitize(line.material?.provider || '')}</div>
           </td>
-          <td class="cell-with-meta compact-cost-cell">
+          <td class="cell-with-meta compact-cost-cell" data-label="Costo unitario">
             <div class="unit-cost-inline">
               <strong>${formatCurrencySmart(line.unitCost)}</strong>
               ${renderInfoTip(formulaInfo)}
@@ -10076,14 +10997,15 @@ Objetivo
             </div>
             <div class="small">${sanitize(line.material?.unit || '-')}</div>
           </td>
-          <td class="usage-cell">
+          <td class="usage-cell" data-label="Material usado">
             <input type="number" min="0" step="0.01" data-collection="quote.materials" data-id="${line.id}" data-key="quantity" value="${line.quantity}" />
             <div class="waste-inline waste-inline-compact">
               <label class="small">Merma %</label>
               <span class="input-suffix-wrap"><input class="input-sm waste-input-sm" type="number" min="0" max="100" step="0.5" inputmode="decimal" data-collection="quote.materials" data-id="${line.id}" data-key="wastePercent" value="${wastePercent}" title="Merma en %: escribe 10 para 10%" /><span class="input-suffix">%</span></span>
             </div>
+            ${line.material?.calculationUnit === 'cm2' ? `<button type="button" class="btn btn-soft btn-xs quote-line-toggle ${isOpen ? 'active' : ''}" data-action="toggle-quote-line" data-id="${line.id}" aria-expanded="${isOpen}" title="Medidas de las piezas y uso de la placa">${isOpen ? '▴ Cerrar medidas' : '▾ Medidas y placa'}</button>` : ''}
           </td>
-          <td class="cell-amount">
+          <td class="cell-amount" data-label="Valor en uso">
             <strong>${formatCurrency(line.orderTotal)}</strong>
             ${hasMultipleUnits && line.scope === 'unit' ? `<div class="small">${formatCurrency(line.lineTotal)} × ${pieceQuantity} u.</div>` : ''}
             <div class="small">Base: ${formatCurrency(line.baseLineTotal || 0)}</div>
@@ -10091,10 +11013,11 @@ Objetivo
             ${renderLineScopeSelect('quote.materials', line)}
             ${line.material ? `<input class="input-sm material-line-comment" type="text" maxlength="80" data-collection="quote.materials" data-id="${line.id}" data-key="comment" value="${sanitize(line.comment || '')}" placeholder="¿A qué parte corresponde?" title="Comentario: diferencia para qué parte del producto es este insumo" />` : ''}
           </td>
-          <td>
+          <td class="quote-line-actions">
             <button class="btn btn-soft btn-icon" title="Eliminar línea" aria-label="Eliminar línea" data-action="remove-material-line" data-id="${line.id}">${iconSvg('trash')}</button>
           </td>
         </tr>
+        ${isOpen ? renderQuoteLineDetail(line) : ''}
       `;
     }).join('');
 
@@ -10112,27 +11035,27 @@ Objetivo
 
       return `
         <tr>
-          <td>
+          <td data-label="Persona">
             <select data-collection="quote.labor" data-id="${line.id}" data-key="employeeId">${employeeOptions}</select>
             ${isExternal ? `<div class="small">${sanitize(line.externalResource?.type || 'Ayuda externa')}</div>` : ''}
           </td>
-          <td>
+          <td data-label="Tiempo">
             ${renderLaborTimeInputs(line)}
             ${renderLineScopeSelect('quote.labor', line)}
           </td>
-          <td>
+          <td data-label="Valor base">
             <input type="text" data-format="clp" min="0" step="1" data-collection="quote.labor" data-id="${line.id}" data-key="rate" value="${formatNumber(line.rate || 0)}" />
           </td>
-          <td class="cell-with-meta compact-cost-cell">
+          <td class="cell-with-meta compact-cost-cell" data-label="Valor hora real">
             <div class="unit-cost-inline"><strong>${formatCurrency(line.realRate || 0)}</strong>${renderInfoTip(rateHelp)}</div>
             <div class="small">${isExternal ? 'Sin corrección por eficiencia' : `E: ${formatPercent(line.efficiencyApplied || scenario.efficiency)}`}</div>
           </td>
-          <td class="cell-amount">
+          <td class="cell-amount" data-label="Total">
             <strong>${formatCurrency(line.orderTotal)}</strong>
             ${hasMultipleUnits && line.scope === 'unit' ? `<div class="small">${formatHoursMinutes(line.orderHours)} en total</div>` : ''}
             ${isExternal ? '<div class="small">Sin CIF (externo)</div>' : ''}
           </td>
-          <td class="labor-note-cell">
+          <td class="labor-note-cell" data-label="Notas">
             ${isExternal
               ? `<span class="small">${sanitize(line.externalResource?.description || 'Sin nota en subbase')}</span>`
               : '<span class="small">—</span>'}
@@ -10154,18 +11077,44 @@ Objetivo
       </button>
     `).join('');
 
-    return `
-      <div class="card">
-        <div class="section-title">
-          <div>
-            <h2>Ficha Técnica OT</h2>
-          </div>
-          <div class="inline-actions action-pair">
-            <button class="btn btn-soft btn-add-line-icon" data-action="open-calculator" title="Calculadora" aria-label="Calculadora">${iconSvg('calculator')}</button>
-            <button class="btn btn-soft btn-add-line-icon" data-action="clear-quote-form" title="Limpiar ficha" aria-label="Limpiar ficha">${iconSvg('broom')}</button>
-          </div>
-        </div>
+    // Pasos del presupuesto: cada bloque lleva su número y el color del tipo de costo
+    // (los mismos del gráfico de composición). Solo es diseño: los campos no cambian.
+    const qs = calc.quoteSummary;
+    const editingOrder = state.ui.editingOrderId ? findOrderById(state.ui.editingOrderId) : null;
+    const customerLabel = quote.customerName || state.contacts.find((contact) => contact.id === quote.customerId)?.name || '';
+    const quoteSteps = [
+      ['1', 'Cliente', '', ''],
+      ['2', 'Materiales', 'mat', qs.materialsTotal],
+      ['3', 'Mano de obra', 'mo', qs.laborTotal],
+      ['4', 'Unidades', '', null],
+      ['5', 'CIF', 'cif', qs.cifTotal],
+      ['6', 'Logística', 'log', qs.logisticsTotal],
+      ['7', 'Precio', '', qs.effectiveGross]
+    ];
+    const stepTitle = (num, title, costKey, amount) => `<h3 class="quote-step-title">${costKey ? `<i class="cost-dot cost-${costKey}"></i>` : ''}<span class="quote-step-num">${num}</span>${title}</h3>${amount !== undefined && amount !== null ? `<span class="quote-step-amount mono">${formatCurrency(amount || 0)}</span>` : ''}`;
+    const costParts = [['mat', qs.materialsTotal], ['mo', qs.laborTotal], ['cif', qs.cifTotal], ['log', qs.logisticsTotal]].map(([key, value]) => [key, Number(value) || 0]);
+    const costPartsTotal = costParts.reduce((acc, item) => acc + item[1], 0);
+    const frequentMaterials = getFrequentQuoteMaterials();
 
+    return `
+      <div class="card quote-head-card">
+        ${renderPageHead('prod', editingOrder ? `Editar ${sanitize(quote.orderNumber || 'OT')}` : 'Nueva OT', `${sanitize(quote.orderNumber || 'Sin número')}${customerLabel ? ` · ${sanitize(customerLabel)}` : ''}${quote.orderTitle ? ` · ${sanitize(quote.orderTitle)}` : ''}${isPrototype ? ' · Prototipo (no suma en ventas)' : ''}`, `
+          <button class="btn btn-soft btn-add-line-icon" data-action="open-calculator" title="Calculadora" aria-label="Calculadora">${iconSvg('calculator')}</button>
+          <button class="btn btn-soft btn-add-line-icon" data-action="clear-quote-form" title="Limpiar ficha" aria-label="Limpiar ficha">${iconSvg('broom')}</button>
+          ${editingOrder ? '<button class="btn btn-soft" data-view="orders">Volver al Panel OT</button>' : ''}`)}
+      </div>
+
+      <nav class="quote-steps" aria-label="Pasos del presupuesto">
+        ${quoteSteps.map(([num, title, costKey, amount]) => `
+          <button type="button" class="quote-step-link" data-action="scroll-quote-step" data-step="${num}">
+            <span class="quote-step-num">${num}</span>
+            <span class="quote-step-text"><span>${title}</span>${amount !== null && amount !== '' ? `<strong class="mono ${costKey ? `cost-text-${costKey}` : ''}">${formatCurrency(amount || 0)}</strong>` : ''}</span>
+          </button>`).join('')}
+        ${costPartsTotal > 0 ? `<span class="quote-steps-bar" role="img" aria-label="Composición del costo">${costParts.filter((item) => item[1] > 0).map(([key, value]) => `<span class="cost-${key}" style="width:${(value / costPartsTotal * 100).toFixed(2)}%"></span>`).join('')}</span>` : ''}
+      </nav>
+
+      <div class="card quote-step" id="quote-step-1">
+        <div class="section-title">${stepTitle('1', 'Cliente y producto', '', null)}</div>
         <div class="database-form-layout">
           <div class="form-section">
             <div class="form-section-title">Datos generales</div>
@@ -10230,15 +11179,19 @@ Objetivo
         </div>
       </div>
 
-      <div class="card">
+      <div class="card quote-step quote-step-mat" id="quote-step-2">
         <div class="section-title">
-          <div>
-            <h3>Insumos de la Orden de trabajo</h3>
-          </div>
+          <div class="quote-step-head">${stepTitle('2', 'Materiales', 'mat', qs.materialsTotal)}</div>
           <div class="inline-actions action-pair">
             <button class="btn btn-primary btn-add-line-icon" data-action="add-material-line" title="Agregar línea" aria-label="Agregar línea">${iconSvg('plus')}</button>
             <button class="btn btn-soft btn-add-line-icon" data-action="clear-material-lines" title="Limpiar tabla" aria-label="Limpiar tabla">${iconSvg('broom')}</button>
           </div>
+        </div>
+        <div class="quote-mat-search">
+          <label for="quote-mat-search">Agregar insumo, servicio o proceso</label>
+          <input id="quote-mat-search" type="search" autocomplete="off" value="${sanitize(state.ui.quoteMatQuery || '')}" placeholder="Escribe: mdf, acrílico, laca, láser…" />
+          <div id="quote-mat-results" class="quote-mat-results">${renderQuoteMaterialResults(state.ui.quoteMatQuery || '')}</div>
+          ${frequentMaterials.length ? `<div class="quote-mat-frequent"><span class="small">Frecuentes:</span>${frequentMaterials.map((item) => `<button type="button" class="btn btn-soft btn-xs" data-action="quick-add-material" data-id="${sanitize(item.id)}">+ ${sanitize(item.name)}</button>`).join('')}</div>` : ''}
         </div>
         <div class="table-wrap table-compact quote-work-table">
           <table>
@@ -10264,11 +11217,9 @@ Objetivo
         </div>
       </div>
 
-      <div class="card">
+      <div class="card quote-step quote-step-mo" id="quote-step-3">
         <div class="section-title">
-          <div>
-            <h3>Mano de obra</h3>
-          </div>
+          <div class="quote-step-head">${stepTitle('3', 'Mano de obra', 'mo', qs.laborTotal)}</div>
           <div class="inline-actions action-pair">
             <button class="btn btn-primary btn-add-line-icon" data-action="add-labor-line" title="Agregar línea" aria-label="Agregar línea">${iconSvg('plus')}</button>
             <button class="btn btn-soft btn-add-line-icon" data-action="clear-labor-lines" title="Limpiar tabla" aria-label="Limpiar tabla">${iconSvg('broom')}</button>
@@ -10301,11 +11252,9 @@ Objetivo
         ${renderQuoteEfficiencyField(calc.quoteSummary)}
       </div>
 
-      <div class="card">
+      <div class="card quote-step" id="quote-step-4">
         <div class="section-title">
-          <div>
-            <h3>Cantidad de unidades</h3>
-          </div>
+          <div class="quote-step-head">${stepTitle('4', 'Cantidad de unidades', '', null)}</div>
         </div>
         <div class="grid-2">
           <div>
@@ -10329,12 +11278,11 @@ Objetivo
           : (hasMultipleUnits ? renderQuantityPriceTable() : '')}
       </div>
 
-      <div class="card">
+      <div class="card quote-step quote-step-cif" id="quote-step-5">
         <div class="section-title">
-          <div>
-            <h3>CIF aplicado a la orden</h3>
-          </div>
+          <div class="quote-step-head">${stepTitle('5', 'CIF aplicado a la orden', 'cif', qs.cifTotal)}</div>
         </div>
+        <p class="help">Luz, arriendo, desgaste de máquinas y demás costos del taller, repartidos por hora de trabajo (tasa del Escenario).</p>
         ${renderRentBlock(calc.quoteSummary)}
         <div class="kpi-grid kpi-grid-compact-3">
           <div class="kpi-box"><span>Tiempo que carga CIF</span><strong>${formatHoursMinutes(calc.quoteSummary.cifHours)}</strong>${calc.quoteSummary.cifHours < calc.quoteSummary.totalLaborHours ? '<span class="small">Sin horas externas</span>' : ''}</div>
@@ -10343,10 +11291,10 @@ Objetivo
         </div>
       </div>
 
-      <div class="card">
-        <details class="finance-section-details">
+      <div class="card quote-step quote-step-log" id="quote-step-6">
+        <details class="finance-section-details" ${quote.logistics?.mode && quote.logistics.mode !== 'retiro' ? 'open' : ''}>
           <summary>
-            Logística y despacho
+            <span class="quote-step-summary"><i class="cost-dot cost-log"></i><span class="quote-step-num">6</span>Logística y despacho</span>
             <span class="logistics-summary-badge">${sanitize({ retiro: 'Retiro en taller', metro: 'Entrega en Metro', domicilio: 'Entrega a domicilio', starken: 'Envío por Starken' }[quote.logistics.mode] || 'Retiro en taller')} · ${formatCurrency(calc.quoteSummary.logisticsTotal || 0)}</span>
           </summary>
           <div class="finance-section-body">
@@ -10374,10 +11322,10 @@ Objetivo
         </details>
       </div>
 
-      <div class="card">
+      <div class="card quote-step" id="quote-step-7">
         <div class="section-title">
           <div>
-            <h3>Precios de venta</h3>
+            <div class="quote-step-head">${stepTitle('7', 'Precio de venta', '', null)}</div>
             <p class="subtitle">Selecciona una referencia sugerida o fija un precio manual según valor percibido, marca o negociación.</p>
           </div>
         </div>
@@ -10404,7 +11352,7 @@ Objetivo
         </div>
 
         <div class="inline-actions">
-          <button class="btn btn-primary" data-action="save-order-system">Incorporar al Panel OT</button>
+          <button class="btn btn-primary" data-action="save-order-system">${editingOrder ? 'Guardar cambios en el Panel OT' : 'Incorporar al Panel OT'}</button>
           <button class="btn btn-soft" data-action="export-order-json">Guardar la OT en mi computador</button>
           <button class="btn btn-soft" data-action="export-order-print">Exportar OT en PDF</button>
           ${(() => {
@@ -10771,7 +11719,7 @@ Objetivo
         const clientIcon = item.type === 'empresa' ? '▦' : '◈';
         const friendClass = item.isFriend ? 'is-friend' : '';
         return `
-        <tr>
+        <tr class="row-clickable ${idsEqual(item.id, state.ui.editingContactId) ? 'is-selected' : ''}" data-action="edit-contact" data-id="${item.id}" title="Abrir ficha">
           <td class="client-number-cell"><strong>#${formatNumber(item.clientNumber)}</strong></td>
           <td class="client-type-cell">
             <button class="btn-icon btn-status-plain client-friend-toggle ${friendClass}" data-action="toggle-contact-friend" data-id="${item.id}" title="Marcar cliente amigo" aria-label="Marcar cliente amigo">${clientIcon}</button>
@@ -10897,6 +11845,8 @@ Objetivo
           </div>
     `;
 
+    // Escritorio: la ficha se abre con "+ Nuevo cliente" o al editar; la tabla queda siempre a la vista.
+    const contactFormOpen = Boolean(state.ui.contactFormOpen || state.ui.editingContactId || state.ui.contactDraft);
     const formActions = `
         <div class="inline-actions action-pair">
           <button class="btn btn-primary" data-action="save-contact">${state.ui.editingContactId ? 'Actualizar cliente' : 'Guardar cliente'}</button>
@@ -10949,19 +11899,21 @@ Objetivo
 
     return `
       <div class="card">
-        <div class="section-title">
-          <div>
-            <h2>Ficha de Cliente nuevo</h2>
-            <p class="subtitle">Registra tus clientes para reutilizar su información más adelante en despachos, envíos y órdenes de trabajo.</p>
-          </div>
-        </div>
+        ${renderPageHead('prod', 'Clientes', `${state.contacts.length} cliente${state.contacts.length === 1 ? '' : 's'} · se usan en la OT, despachos y envíos`, '<button class="btn btn-primary" data-action="open-contact-form">+ Nuevo cliente</button>')}
+      </div>
 
+      <div class="db-split has-ficha">
+      ${contactFormOpen ? `<div class="card db-ficha">
+        <div class="section-title">
+          <div><h3>${state.ui.editingContactId ? `Editar cliente · ${sanitize(editing.name || '')}` : 'Ficha de cliente nuevo'}</h3></div>
+          <button class="btn btn-soft" data-action="cancel-edit-contact">Cerrar ficha</button>
+        </div>
         <div class="database-form-layout">
           ${formSections}
         </div>
 
         ${formActions}
-      </div>
+      </div>` : renderFichaPlaceholder('Selecciona un cliente de la tabla para ver y editar su ficha.', 'open-contact-form', '+ Nuevo cliente')}
 
       <div class="card">
         <div class="section-title">
@@ -10987,10 +11939,64 @@ Objetivo
                 <th></th>
               </tr>
             </thead>
-            <tbody>${rows || '<tr><td colspan="9" class="empty-state">Aún no hay clientes guardados. Crea el primero desde la ficha superior.</td></tr>'}</tbody>
+            <tbody>${rows || '<tr><td colspan="9" class="empty-state">Aún no hay clientes guardados. Crea el primero con "+ Nuevo cliente".</td></tr>'}</tbody>
           </table>
         </div>
 
+      </div>
+      </div>
+    `;
+  }
+
+  // Datos que le faltan a una OT para quedar "totalmente ingresada". Solo las OT reales (no prototipos).
+  function getOrderDataIssues(order) {
+    if (!order || isPrototypeOrder(order)) return [];
+    const issues = [];
+    const pay = getOrderPaymentStatus(order);
+    const delivered = isDeliveryCompleted(order.deliveryState || order.quote?.deliveryState) || String(order.status || '').startsWith('Entregado');
+    if (pay.kind === 'paid-status' && pay.financeGap > 1) issues.push(`Figura pagada, pero faltan ${formatCurrency(pay.financeGap)} de cobro en Finanzas`);
+    if (delivered && !getPrimaryAttachment(order, legacyOrderInvoiceAttachment)) issues.push('Entregada sin boleta o factura adjunta');
+    if (!order.customerId && !String(order.customerName || '').trim()) issues.push('Sin cliente');
+    return issues;
+  }
+
+  // Ventas netas del año (Finanzas, categoría Ventas, sin IVA). No suman los cobros ligados a prototipos.
+  function getYearSalesProgress(year = new Date().getFullYear()) {
+    const rate = Number(state.scenario?.ivaRate) > 0 ? Number(state.scenario.ivaRate) : 0.19;
+    const prototypeIds = new Set((state.orders || []).filter(isPrototypeOrder).map((order) => String(order.id)));
+    const net = (state.finance?.entries || [])
+      .filter((e) => e.category === 'Ventas' && String(e.date || '').startsWith(String(year)) && !(e.orderId && prototypeIds.has(String(e.orderId))))
+      .reduce((acc, e) => acc + (Number(e.income) || 0) / (e.ivaIncluded ? 1 + rate : 1), 0);
+    const goal = window.ERMCalc.annualSalesGoal(state.scenario);
+    const start = new Date(year, 0, 1);
+    const yearDays = (new Date(year + 1, 0, 1) - start) / 86400000;
+    const elapsed = Math.min(1, Math.max(0, (Date.now() - start) / 86400000 / yearDays));
+    // OT que figuran pagadas sin su cobro en Finanzas: no suman hasta completarlas.
+    const missing = (state.orders || []).map((order) => getOrderPaymentStatus(order)).filter((pay) => pay.kind === 'paid-status' && pay.financeGap > 1);
+    const missingNet = missing.reduce((acc, pay) => acc + pay.financeGap / (1 + rate), 0);
+    return { year, net: Math.round(net), goal, expectedToDate: Math.round(goal.target * elapsed), elapsed, missingCount: missing.length, missingNet: Math.round(missingNet) };
+  }
+
+  function renderSalesGoalBar() {
+    const p = getYearSalesProgress();
+    const target = p.goal.target;
+    if (!(target > 0)) return '';
+    const pct = (value) => `${Math.min(100, Math.max(0, value / target * 100)).toFixed(1)}%`;
+    const ahead = p.net >= p.expectedToDate;
+    const left = Math.max(0, target - p.net);
+    return `
+      <div class="sales-goal" role="group" aria-label="Meta anual de ventas">
+        <div class="sales-goal-head">
+          <strong>Meta de ventas ${p.year}</strong>
+          <span>Vendido <strong class="mono">${formatCurrency(p.net)}</strong> · Meta <strong class="mono">${formatCurrency(target)}</strong> · ${formatPercent(p.net / target)}</span>
+        </div>
+        <div class="sales-goal-bar" role="img" aria-label="Llevas ${formatPercent(p.net / target)} de la meta anual">
+          <span class="sales-goal-fill ${ahead ? 'is-ahead' : 'is-behind'}" style="width:${pct(p.net)}"></span>
+          ${p.goal.minimum > 0 && p.goal.minimum < target ? `<i class="sales-goal-mark is-min" style="left:${pct(p.goal.minimum)}" title="Venta mínima del año: ${formatCurrency(p.goal.minimum)}"></i>` : ''}
+          <i class="sales-goal-mark is-today" style="left:${pct(p.expectedToDate)}" title="A la fecha deberías llevar ${formatCurrency(p.expectedToDate)}"></i>
+        </div>
+        <div class="small">${left > 0 ? `Te faltan <strong>${formatCurrency(left)}</strong> para la meta.` : '<strong>Meta cumplida.</strong>'} ${ahead ? 'Vas adelantado' : 'Vas atrasado'} respecto de lo esperado a hoy (${formatCurrency(p.expectedToDate)}). Ventas netas sin IVA, sin prototipos.${p.goal.isManual ? '' : ' Meta automática del Escenario.'}</div>
+        ${p.missingCount ? `<div class="small sales-goal-missing">⚠ ${p.missingCount} OT figura${p.missingCount === 1 ? '' : 'n'} pagada${p.missingCount === 1 ? '' : 's'} sin su cobro en Finanzas y no suma${p.missingCount === 1 ? '' : 'n'} (${formatCurrency(p.missingNet)} netos). Complétala${p.missingCount === 1 ? '' : 's'} desde la pestaña Pagos de cada OT.</div>` : ''}
       </div>
     `;
   }
@@ -11027,6 +12033,13 @@ Objetivo
 
     const currentFilterLabel = ORDER_FILTER_OPTIONS.find((item) => item.key === filter)?.label || 'Todas';
 
+    // Subtítulo: los prototipos no suman en cobros (se pueden borrar sin aviso).
+    const realOrders = (state.orders || []).filter((order) => !isPrototypeOrder(order));
+    const pendingPayments = realOrders.map(getOrderPaymentStatus).filter((info) => info.kind === 'pending' && info.pending > 0);
+    const porCobrar = pendingPayments.reduce((acc, info) => acc + info.pending, 0);
+    const prototypeCount = (state.orders || []).length - realOrders.length;
+    const panelSubtitle = `${realOrders.length} OT · ${groupCounts.pending} sin entregar · <span title="Aceptadas, abonadas o entregadas sin pagar. No incluye prospectos ni OT pagadas.">${formatCurrency(porCobrar)} por cobrar en ${pendingPayments.length} OT</span>${prototypeCount ? ` · ${prototypeCount} prototipo${prototypeCount === 1 ? '' : 's'} (no suman)` : ''}`;
+
     // Pestañas de OT "a la mano" (solo UI local). Se limpian las de OT borradas.
     const tabOrders = (Array.isArray(state.ui.orderTabs) ? state.ui.orderTabs : [])
       .map((id) => findOrderById(id))
@@ -11056,6 +12069,7 @@ Objetivo
       const hasInvoice = Boolean(getPrimaryAttachment(order, legacyOrderInvoiceAttachment));
       const productImage = getOrderProductImage(order);
       const inTabs = isInTabs(order);
+      const issues = getOrderDataIssues(order);
       return `
         <div class="ot-card ${meta.className} ${delivered ? 'is-delivered' : ''} ${idsEqual(selectedOrder?.id, order.id) ? 'selected' : ''}" role="button" tabindex="0" data-action="open-order-card" data-id="${order.id}">
           ${productImage ? `<span class="ot-card-thumb">${renderOrderProductMedia(productImage, 'ot-card-thumb-media')}</span>` : ''}
@@ -11063,6 +12077,7 @@ Objetivo
             <div class="ot-card-number-row">
               <button type="button" class="ot-tab-add-btn ${inTabs ? 'is-added' : ''}" data-action="add-order-tab" data-id="${order.id}" title="${inTabs ? 'Ya está en pestañas' : 'Agregar a pestañas'}" aria-label="${inTabs ? 'Ya está en pestañas' : 'Agregar a pestañas'}">${inTabs ? '✓' : '+'}</button>
               <span class="small ot-card-number">${sanitize(order.orderNumber || '-')}</span>
+              ${issues.length ? `<span class="ot-card-warn" role="img" aria-label="Datos incompletos: ${sanitize(issues.join('. '))}" title="Datos incompletos:&#10;• ${issues.map((text) => sanitize(text)).join('&#10;• ')}">⚠</span>` : ''}
             </div>
             <strong class="ot-card-title" title="${sanitize(titleRaw)}">${sanitize(titleRaw)}</strong>
             <div class="ot-card-tags">
@@ -11092,11 +12107,9 @@ Objetivo
       const contribution = Number(sum.contribution || 0);
       const deliveryDate = selectedOrder.estimatedDeliveryDate || selectedOrder.quote?.estimatedDeliveryDate || '-';
       const selectedImage = getOrderProductImage(selectedOrder);
-      const linkedEntries = (state.finance?.entries || []).filter(
-        (e) => e.category === 'Ventas' && e.orderId && idsEqual(e.orderId, selectedOrder.id)
-      ).sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')));
-      const totalCobrado = linkedEntries.reduce((s, e) => s + (Number(e.income) || 0), 0);
-      const pending = Math.max(0, gross - totalCobrado);
+      const payment = getOrderPaymentStatus(selectedOrder);
+      const linkedEntries = payment.entries;
+      const totalCobrado = payment.cobrado;
       const rows = linkedEntries.map((e) => `
         <tr>
           <td class="small">${sanitize(formatFinanceDate(e.date))}</td>
@@ -11105,6 +12118,146 @@ Objetivo
           <td><button class="btn btn-soft btn-xs" data-action="go-to-finance-entry" data-id="${sanitize(e.id)}" title="Ver en Finanzas">↗ Finanzas</button></td>
         </tr>
       `).join('');
+
+      const isPrototype = isPrototypeOrder(selectedOrder);
+      const totalCost = Number(sum.totalCost || 0);
+      const parts = [
+        ['mat', 'Materiales', Number(sum.materialsTotal || 0)],
+        ['mo', 'Mano de obra', Number(sum.laborTotal || 0)],
+        ['cif', 'CIF del taller', Number(sum.cifTotal || 0)],
+        ['log', 'Logística', Number(sum.logisticsTotal || 0)]
+      ];
+      const partsTotal = parts.reduce((acc, item) => acc + item[2], 0);
+      const compositionBar = partsTotal > 0 ? `
+        <div class="ot-composition">
+          <div class="ot-preview-section-title">Composición del costo</div>
+          <div class="ot-composition-bar" role="img" aria-label="${sanitize(parts.map((item) => `${item[1]} ${formatPercent(item[2] / partsTotal)}`).join(', '))}">
+            ${parts.filter((item) => item[2] > 0).map((item) => `<span class="cost-${item[0]}" style="width:${(item[2] / partsTotal * 100).toFixed(2)}%"></span>`).join('')}
+          </div>
+          <div class="ot-composition-legend">
+            ${parts.map((item) => `<span><i class="cost-${item[0]}"></i>${item[1]} <strong>${formatCurrency(item[2])}</strong> <em>${formatPercent(partsTotal ? item[2] / partsTotal : 0)}</em></span>`).join('')}
+          </div>
+        </div>` : '';
+
+      const materialLines = Array.isArray(sum.materialLines) ? sum.materialLines : [];
+      const laborLines = Array.isArray(sum.laborLines) ? sum.laborLines : [];
+      const hasInvoice = Boolean(getPrimaryAttachment(selectedOrder, legacyOrderInvoiceAttachment));
+      const tabs = [
+        ['resumen', 'Resumen'],
+        ['materiales', 'Materiales'],
+        ['pagos', `Pagos${linkedEntries.length ? ` <span class="ot-tab-count">${linkedEntries.length}</span>` : ''}`],
+        ['tiempo', 'Tiempo'],
+        ['documentos', `Documentos${hasInvoice ? '' : ' <span class="ot-tab-flag" title="Falta boleta o factura">!</span>'}`]
+      ];
+      const activeTab = tabs.some((item) => item[0] === state.ui.orderPreviewTab) ? state.ui.orderPreviewTab : 'resumen';
+
+      // Tiempo real (Asistencia) contra las horas cotizadas en la mano de obra de la OT.
+      const timeDetail = getOrderTimeDetail(selectedOrder.id);
+      const quotedHours = laborLines.filter((line) => line.employee).reduce((acc, line) => acc + (Number(line.orderHours ?? line.hours) || 0), 0);
+      const overQuoted = quotedHours > 0 && timeDetail.personMs / 3600000 > quotedHours;
+      const trackedBlock = (timeDetail.totalMs > 0 || quotedHours > 0) ? `
+        <div class="ot-tracked">
+          <div class="ot-preview-section-title">Tiempo registrado</div>
+          <dl class="ot-preview-facts ot-preview-facts-3">
+            <div><dt>Horas humanas</dt><dd class="${overQuoted ? 'is-bad' : ''}">${formatMsAsHours(timeDetail.personMs)}${quotedHours > 0 ? ` <span class="small">de ${formatHoursMinutes(quotedHours)}</span>` : ''}</dd></div>
+            <div><dt>Horas máquina</dt><dd>${formatMsAsHours(timeDetail.machineMs)}</dd></div>
+            <div><dt>Horas totales</dt><dd>${formatMsAsHours(timeDetail.totalMs)}</dd></div>
+          </dl>
+          <button type="button" class="btn btn-soft btn-xs" data-action="set-order-preview-tab" data-tab="tiempo">Ver detalle</button>
+        </div>` : '';
+
+      const shiftRows = timeDetail.shifts.map((item) => `<tr><td class="small">${sanitize(formatFinanceDate(toLocalDateValue(new Date(item.date))))} ${sanitize(formatAttendanceTime(item.date))}${item.live ? ' <span class="pill warn">en curso</span>' : ''}</td><td>${sanitize(item.person || '-')}</td><td class="mono">${formatDurationFromMs(item.ms)}</td></tr>`).join('');
+      const machineRows = timeDetail.machines.map((item) => `<tr><td class="small">${sanitize(formatFinanceDate(toLocalDateValue(new Date(item.date))))} ${sanitize(formatAttendanceTime(item.date))}${item.live ? ' <span class="pill warn">en marcha</span>' : ''}</td><td>${sanitize(item.machine)}</td><td class="mono">${formatDurationFromMs(item.ms)}</td></tr>`).join('');
+      const quotedDiff = quotedHours > 0 ? quotedHours - timeDetail.personMs / 3600000 : null;
+      const tiempoTab = `
+        <div class="ot-kpis">
+          <div class="ot-kpi"><span>Horas humanas</span><strong>${formatMsAsHours(timeDetail.personMs)}</strong><small>${quotedHours > 0 ? `Cotizadas ${formatHoursMinutes(quotedHours)}` : 'Sin horas cotizadas'}</small></div>
+          <div class="ot-kpi"><span>Horas máquina</span><strong>${formatMsAsHours(timeDetail.machineMs)}</strong><small>${Object.keys(timeDetail.byMachine).length} máquina${Object.keys(timeDetail.byMachine).length === 1 ? '' : 's'}</small></div>
+          <div class="ot-kpi"><span>Horas totales</span><strong>${formatMsAsHours(timeDetail.totalMs)}</strong><small>humanas + máquina</small></div>
+        </div>
+        ${quotedDiff !== null && timeDetail.personMs > 0 ? `<div class="ot-time-note ${quotedDiff < 0 ? 'is-bad' : ''}">${quotedDiff < 0 ? `Llevas ${formatHoursMinutes(-quotedDiff)} más de lo cotizado en mano de obra.` : `Te quedan ${formatHoursMinutes(quotedDiff)} de las horas cotizadas.`}</div>` : ''}
+        ${Object.keys(timeDetail.byPerson).length > 1 ? `<dl class="ot-preview-facts">${Object.entries(timeDetail.byPerson).map(([name, ms]) => `<div><dt>${sanitize(name)}</dt><dd>${formatMsAsHours(ms)}</dd></div>`).join('')}</dl>` : ''}
+        <div class="ot-preview-section-title">Jornadas</div>
+        ${shiftRows ? `<div class="table-wrap ot-lines"><table><thead><tr><th>Fecha</th><th>Persona</th><th>Tiempo en esta OT</th></tr></thead><tbody>${shiftRows}</tbody></table></div>` : '<div class="small">Sin jornadas registradas. En Asistencia, marca esta OT mientras trabajas en ella.</div>'}
+        <div class="ot-preview-section-title">Máquinas</div>
+        ${machineRows ? `<div class="table-wrap ot-lines"><table><thead><tr><th>Inicio</th><th>Máquina</th><th>Tiempo</th></tr></thead><tbody>${machineRows}</tbody></table></div>` : '<div class="small">Sin uso de máquinas registrado para esta OT.</div>'}
+        <div><button type="button" class="btn btn-soft btn-xs" data-view="attendance">Ir a Asistencia</button></div>
+      `;
+
+      const resumenTab = `
+        <div class="ot-kpis">
+          <div class="ot-kpi"><span>Precio con IVA</span><strong>${formatCurrency(gross)}</strong><small>Neto ${formatCurrency(net)} · IVA ${formatCurrency(gross - net)}</small></div>
+          <div class="ot-kpi"><span>Costo total</span><strong>${formatCurrency(totalCost)}</strong><small>Sueldo ${formatCurrency(sum.laborTotal || 0)}</small></div>
+          <div class="ot-kpi ot-kpi-${selectedAchievement.tone}"><span>Margen real</span><strong>${formatPercent(sum.realMargin || 0)}</strong><small class="${contribution > 0 ? 'is-good' : 'is-bad'}">Utilidad ${formatCurrency(contribution)}</small></div>
+        </div>
+        ${isPrototype ? '<div class="ot-proto-note">Prototipo: no suma en cobros ni totales de ventas.</div>' : ''}
+        ${compositionBar}
+        <dl class="ot-preview-facts">
+          <div><dt>Cliente</dt><dd>${sanitize(selectedOrder.customerName || '-')}</dd></div>
+          <div><dt>Producto</dt><dd>${sanitize(selectedOrder.productName || '-')}</dd></div>
+          <div><dt>Fecha ingreso</dt><dd>${sanitize(selectedOrder.quoteDate || '-')}</dd></div>
+          <div><dt>Fecha entrega</dt><dd><strong>${sanitize(deliveryDate)}</strong></dd></div>
+        </dl>
+        ${trackedBlock}
+        ${isPrototype ? '' : `<div class="ot-preview-delivery"><div class="ot-preview-section-title">Estado de entrega</div><div class="ot-preview-toggle-wrap">${renderDeliveryToggle(selectedDeliveryState, selectedOrder.id)}</div></div>`}
+      `;
+
+      const unitOf = (line) => sanitize(line.material?.calculationUnit || line.unit || '');
+      const materialesTab = (materialLines.length || laborLines.length) ? `
+        ${materialLines.length ? `
+          <div class="ot-preview-section-title"><i class="cost-dot cost-mat"></i>Materiales</div>
+          <div class="table-wrap ot-lines"><table>
+            <thead><tr><th>Insumo</th><th>Cantidad</th><th>Merma</th><th>Subtotal</th></tr></thead>
+            <tbody>${materialLines.map((line) => `<tr><td>${sanitize(line.material?.name || line.name || 'Insumo')}</td><td class="mono">${formatNumber(line.effectiveQuantity ?? line.quantity ?? 0, 0, 2)} ${unitOf(line)}</td><td class="mono">${formatNumber(line.wastePercent || 0, 0, 1)} %</td><td class="mono">${formatCurrency(line.orderTotal || line.lineTotal || 0)}</td></tr>`).join('')}</tbody>
+            <tfoot><tr><td colspan="3">Total materiales</td><td class="mono">${formatCurrency(sum.materialsTotal || 0)}</td></tr></tfoot>
+          </table></div>` : ''}
+        ${laborLines.length ? `
+          <div class="ot-preview-section-title"><i class="cost-dot cost-mo"></i>Mano de obra</div>
+          <div class="table-wrap ot-lines"><table>
+            <thead><tr><th>Persona o recurso</th><th>Horas</th><th>Valor hora real</th><th>Subtotal</th></tr></thead>
+            <tbody>${laborLines.map((line) => `<tr><td>${sanitize(line.employee?.name || line.externalResource?.name || 'Trabajo')}</td><td class="mono">${formatNumber(line.orderHours ?? line.hours ?? 0, 0, 2)} h</td><td class="mono">${formatCurrency(line.realRate || 0)}</td><td class="mono">${formatCurrency(line.orderTotal || 0)}</td></tr>`).join('')}</tbody>
+            <tfoot><tr><td colspan="3">Total mano de obra</td><td class="mono">${formatCurrency(sum.laborTotal || 0)}</td></tr></tfoot>
+          </table></div>` : ''}
+        <dl class="ot-preview-facts">
+          <div><dt><i class="cost-dot cost-cif"></i>CIF del taller</dt><dd>${formatCurrency(sum.cifTotal || 0)} <span class="small">(${formatNumber(sum.cifHours || 0, 0, 2)} h)</span></dd></div>
+          <div><dt><i class="cost-dot cost-log"></i>Logística</dt><dd>${formatCurrency(sum.logisticsTotal || 0)}</dd></div>
+        </dl>
+      ` : '<div class="empty-state">Esta OT no guardó el detalle de materiales. Ábrela en el presupuestador para verlo.</div>';
+
+      const paidRatio = payment.paid ? 1 : (gross > 0 ? Math.min(1, totalCobrado / gross) : 0);
+      const paymentNote = {
+        paid: 'Pagada completa: los cobros en Finanzas cubren el total.',
+        'paid-status': `Pagada según el estado de la OT${payment.cobrado > 0 ? `, pero en Finanzas solo hay ${formatCurrency(payment.cobrado)} ligados` : ', pero no tiene cobros ligados en Finanzas'}. Para que los números cuadren, registra los ${formatCurrency(payment.financeGap)} que faltan.`,
+        prospect: `Aún es prospecto: no suma en "por cobrar" hasta que se acepte. Total ${formatCurrency(payment.pending)}.`,
+        pending: `Por cobrar: <strong>${formatCurrency(payment.pending)}</strong>.`
+      }[payment.kind] || '';
+      const registerBtn = payment.kind === 'paid-status'
+        ? `<button class="btn btn-soft btn-xs" data-action="register-order-payment" data-id="${selectedOrder.id}">Registrar ${formatCurrency(payment.financeGap)} en Finanzas</button>`
+        : (payment.kind === 'pending' || payment.kind === 'prospect')
+          ? `<button class="btn btn-soft" data-action="register-order-payment" data-id="${selectedOrder.id}">Registrar cobro de ${formatCurrency(payment.pending)} en Finanzas</button>`
+          : '';
+      const pagosTab = isPrototype ? '<div class="ot-proto-note">Prototipo: no tiene cobros.</div>' : `
+        <div class="ot-paid ${payment.paid ? 'is-paid' : ''}">
+          <div class="ot-paid-head"><strong>${payment.paid ? '✓ Pagada' : 'Cobrado'}</strong><span class="mono">${formatCurrency(totalCobrado)} de ${formatCurrency(gross)}</span></div>
+          <div class="ot-paid-bar"><span style="width:${(paidRatio * 100).toFixed(1)}%"></span></div>
+          <div class="small">${paymentNote}</div>
+        </div>
+        ${linkedEntries.length ? `
+          <table class="ot-preview-payments">
+            <thead><tr><th>Fecha</th><th>Descripción</th><th>Monto</th><th></th></tr></thead>
+            <tbody>${rows}</tbody>
+          </table>` : '<div class="small">Sin cobros ligados en Finanzas.</div>'}
+        ${registerBtn ? `<div>${registerBtn}</div>` : ''}
+      `;
+
+      const documentosTab = `
+        <div class="ot-preview-status-row">
+          ${renderOrderInvoiceActions(selectedOrder)}
+          ${renderOrderPhotoActions(selectedOrder)}
+        </div>
+      `;
+
+      const tabBody = { resumen: resumenTab, materiales: materialesTab, pagos: pagosTab, tiempo: tiempoTab, documentos: documentosTab }[activeTab];
 
       return `
         <div class="ot-preview-body">
@@ -11120,65 +12273,16 @@ Objetivo
             <span class="achievement-pill ${selectedAchievement.tone}" title="${sanitize(selectedAchievement.label)}">${selectedAchievement.iconMarkup} ${sanitize(selectedAchievement.label)}</span>
           </div>
           </div>
+          <button class="btn btn-primary ot-preview-edit" data-action="load-order-to-quote" data-id="${selectedOrder.id}">${iconSvg('edit')} Editar en presupuestador</button>
         </div>
 
-        <div class="ot-preview-columns">
-        <div class="ot-preview-col">
-        <div class="ot-preview-section">
-          <div class="ot-preview-section-title">Datos</div>
-          <dl class="ot-preview-facts">
-            <div><dt>Cliente</dt><dd>${sanitize(selectedOrder.customerName || '-')}</dd></div>
-            <div><dt>Producto</dt><dd>${sanitize(selectedOrder.productName || '-')}</dd></div>
-            <div><dt>Fecha ingreso</dt><dd>${sanitize(selectedOrder.quoteDate || '-')}</dd></div>
-            <div><dt>Fecha entrega</dt><dd><strong>${sanitize(deliveryDate)}</strong></dd></div>
-          </dl>
+        <div class="ot-ficha-tabs" role="tablist" aria-label="Secciones de la ficha">
+          ${tabs.map(([key, label]) => `<button type="button" role="tab" class="ot-ficha-tab ${activeTab === key ? 'active' : ''}" aria-selected="${activeTab === key}" data-action="set-order-preview-tab" data-tab="${key}">${label}</button>`).join('')}
         </div>
-
-        <div class="ot-preview-section">
-          <div class="ot-preview-section-title">Precio</div>
-          <div class="ot-preview-price">
-            <div class="ot-preview-price-main"><span>Precio de venta (con IVA)</span><strong>${formatCurrency(gross)}</strong></div>
-            <div class="ot-preview-price-split">
-              <div><span>Neto</span><strong>${formatCurrency(net)}</strong></div>
-              <div><span>IVA</span><strong>${formatCurrency(gross - net)}</strong></div>
-            </div>
-          </div>
-          <dl class="ot-preview-facts ot-preview-facts-3">
-            <div><dt>Costo real</dt><dd>${formatCurrency(sum.totalCost || 0)}</dd></div>
-            <div><dt>Utilidad</dt><dd class="${contribution > 0 ? 'is-good' : 'is-bad'}">${formatCurrency(contribution)} <span class="small">(${formatPercent(sum.realMargin || 0)})</span></dd></div>
-            <div><dt>Sueldo</dt><dd>${formatCurrency(sum.laborTotal || 0)}</dd></div>
-          </dl>
-        </div>
-
-        </div>
-        <div class="ot-preview-col">
-        <div class="ot-preview-section">
-          <div class="ot-preview-section-title">Entrega, boleta y foto</div>
-          <div class="ot-preview-status-row">
-            ${isPrototypeOrder(selectedOrder) ? '' : `<div><div class="small ot-invoice-title">Estado de entrega</div><div class="ot-preview-toggle-wrap">${renderDeliveryToggle(selectedDeliveryState, selectedOrder.id)}</div></div>`}
-            ${renderOrderInvoiceActions(selectedOrder)}
-            ${renderOrderPhotoActions(selectedOrder)}
-          </div>
-        </div>
-
-        <div class="ot-preview-section">
-          <div class="ot-preview-section-title">Cobros registrados en Finanzas</div>
-          ${linkedEntries.length ? `
-            <table class="ot-preview-payments">
-              <thead><tr><th>Fecha</th><th>Descripción</th><th>Monto</th><th></th></tr></thead>
-              <tbody>${rows}</tbody>
-              <tfoot>
-                <tr><td colspan="2">Total cobrado</td><td class="finance-income-cell">${formatCurrency(totalCobrado)}</td><td></td></tr>
-                ${pending > 0 ? `<tr><td colspan="2">Por cobrar</td><td>${formatCurrency(pending)}</td><td></td></tr>` : ''}
-              </tfoot>
-            </table>` : '<div class="small">Sin cobros asociados a esta OT.</div>'}
-        </div>
-        </div>
-        </div>
+        <div class="ot-ficha-panel" role="tabpanel">${tabBody}</div>
         </div>
 
         <div class="ot-preview-actions-bar">
-          <button class="btn btn-primary" data-action="load-order-to-quote" data-id="${selectedOrder.id}">${iconSvg('edit')} Editar en presupuestador</button>
           <button class="btn btn-soft" data-action="duplicate-order-system" data-id="${selectedOrder.id}">Duplicar</button>
           <button class="btn btn-danger" data-action="delete-order-system" data-id="${selectedOrder.id}">${iconSvg('trash')} Borrar</button>
         </div>
@@ -11187,13 +12291,18 @@ Objetivo
 
     return `
       <div class="card">
-        <div class="section-title">
+        <div class="section-title page-head">
           <div>
-            <h2>Panel de Gestión de OT</h2>
-            <p class="subtitle">Selecciona una OT de la lista para ver su detalle.</p>
+            <span class="page-family nav-group-prod">Producción</span>
+            <h2>Panel OT</h2>
+            <p class="subtitle">${panelSubtitle}</p>
           </div>
-          <span class="pill ok">${(state.orders || []).length} OT</span>
+          <div class="page-actions">
+            <button class="btn btn-soft" data-action="open-order-merge" title="Sumar OT desde un archivo JSON">Sumar OT desde archivo</button>
+            <button class="btn btn-primary" data-view="quote">${state.ui.editingOrderId ? 'Volver al presupuestador' : '+ Nueva OT'}</button>
+          </div>
         </div>
+        ${renderSalesGoalBar()}
 
         <div class="ot-layout">
           <div class="ot-list-panel">
@@ -11220,8 +12329,208 @@ Objetivo
     { key: 'prod', label: 'Producción', sections: [['quote', 'Presupuestador'], ['orders', 'Panel OT'], ['database', 'Base de datos'], ['contacts', 'Clientes']] },
     { key: 'money', label: 'Dinero', sections: [['finance', 'Finanzas'], ['expenses', 'Gastos']] },
     { key: 'shop', label: 'Taller', sections: [['attendance', 'Asistencia'], ['inventory', 'Inventario']] },
-    { key: 'settings', label: 'Ajustes', sections: [['scenario', 'Escenario'], ['backup', 'Respaldo'], ['docs', 'Ayuda técnica']] }
+    { key: 'settings', label: 'Ajustes', sections: [['scenario', 'Escenario'], ['links', 'Enlaces'], ['backup', 'Respaldo'], ['docs', 'Ayuda técnica']] }
   ];
+
+  // Inicio: "¿Qué tengo que hacer hoy?". Junta lo urgente de Asistencia, Panel OT, Finanzas y Gastos.
+  function getTodayItems() {
+    const items = [];
+    const session = state.attendance?.activeSession;
+    const timers = normalizeMachineTimers(state.attendance?.machineTimers);
+    const realOrders = (state.orders || []).filter((order) => !isPrototypeOrder(order));
+
+    realOrders.forEach((order) => {
+      const deliveryState = order.deliveryState || order.quote?.deliveryState || 'Abierta';
+      if (isDeliveryCompleted(deliveryState)) return;
+      const due = order.estimatedDeliveryDate || order.quote?.estimatedDeliveryDate || '';
+      const days = daysUntil(due);
+      if (days === null || days > 7) return;
+      items.push({
+        kind: 'delivery', tone: days < 0 ? 'bad' : (days <= 1 ? 'warn' : 'info'), sort: days,
+        title: `${days < 0 ? 'Entrega atrasada' : days === 0 ? 'Entregar hoy' : days === 1 ? 'Entregar mañana' : `Entregar en ${days} días`}: ${order.orderTitle || 'OT'}`,
+        detail: `${order.orderNumber || '-'} · ${order.customerName || 'sin cliente'} · ${formatFinanceDate(due)}`,
+        action: `data-action="go-to-order" data-id="${sanitize(order.id)}" data-tab="resumen"`, cta: 'Ver OT'
+      });
+    });
+
+    realOrders.map((order) => ({ order, pay: getOrderPaymentStatus(order) }))
+      .filter(({ pay }) => pay.kind === 'pending' && pay.pending > 0)
+      .forEach(({ order, pay }) => {
+        const delivered = isDeliveryCompleted(order.deliveryState || order.quote?.deliveryState) || String(order.status || '').startsWith('Entregado');
+        items.push({
+          kind: 'payment', tone: delivered ? 'bad' : 'info', sort: delivered ? 0.5 : 20,
+          title: `${delivered ? 'Cobrar (ya entregada)' : 'Por cobrar'}: ${formatCurrency(pay.pending)}`,
+          detail: `${order.orderNumber || '-'} · ${order.orderTitle || ''}${pay.cobrado ? ` · abonado ${formatCurrency(pay.cobrado)}` : ''}`,
+          action: `data-action="go-to-order" data-id="${sanitize(order.id)}" data-tab="pagos"`, cta: 'Ver cobros'
+        });
+      });
+
+    realOrders.filter((order) => isDeliveryCompleted(order.deliveryState || order.quote?.deliveryState) && !getPrimaryAttachment(order, legacyOrderInvoiceAttachment))
+      .forEach((order) => items.push({
+        kind: 'invoice', tone: 'warn', sort: 10,
+        title: `Falta la boleta o factura: ${order.orderTitle || 'OT'}`,
+        detail: `${order.orderNumber || '-'} · entregada sin documento adjunto`,
+        action: `data-action="go-to-order" data-id="${sanitize(order.id)}" data-tab="documentos"`, cta: 'Adjuntar'
+      }));
+
+    // Las cuotas vencidas de un mismo gasto van en una sola línea; las por vencer, una por cuota.
+    const overdueByCard = new Map();
+    getExpenseDueList(7).forEach(({ card, entry, index, due, days }) => {
+      if (days < 0) {
+        const group = overdueByCard.get(card.id) || { card, count: 0, amount: 0, oldest: days };
+        group.count += 1;
+        group.amount += Number(entry.amount) || 0;
+        group.oldest = Math.min(group.oldest, days);
+        overdueByCard.set(card.id, group);
+        return;
+      }
+      items.push({
+        kind: 'expense', tone: days <= 2 ? 'warn' : 'info', sort: days,
+        title: `Pagar ${card.name}${Number(entry.amount) ? ` · ${formatCurrency(entry.amount)}` : ''}`,
+        detail: `${entry.label || `Cuota ${index + 1}`} · ${formatDueLabel(days)} (${formatFinanceDate(due)})`,
+        action: `data-action="go-to-expense" data-id="${sanitize(card.id)}"`, cta: 'Ver gasto'
+      });
+    });
+    overdueByCard.forEach(({ card, count, amount, oldest }) => items.push({
+      kind: 'expense', tone: 'bad', sort: oldest,
+      title: `${card.name}: ${count === 1 ? '1 cuota vencida' : `${count} cuotas vencidas`} sin pagar${amount ? ` · ${formatCurrency(amount)}` : ''}`,
+      detail: `La más antigua ${formatDueLabel(oldest)}. Si ya las pagaste, márcalas como pagadas.`,
+      action: `data-action="go-to-expense" data-id="${sanitize(card.id)}"`, cta: 'Ver gasto'
+    }));
+
+    (state.inventory?.desiredItems || []).forEach((item) => {
+      const maint = getEquipmentMaintenance(item);
+      if (!maint || maint.days > 7) return;
+      items.push({
+        kind: 'maint', tone: maint.days < 0 ? 'bad' : 'warn', sort: maint.days,
+        title: `Mantención: ${item.name}`,
+        detail: `${maint.days < 0 ? `vencida hace ${-maint.days} días` : maint.days === 0 ? 'toca hoy' : `en ${maint.days} días`} · cada ${maint.every} días`,
+        action: `data-action="equipment-maintenance-done" data-id="${sanitize(item.id)}"`, cta: '✓ Hecha'
+      });
+    });
+
+    items.sort((a, b) => a.sort - b.sort);
+    return { items, session, timers };
+  }
+
+  function renderTodayPanel() {
+    const { items, session, timers } = getTodayItems();
+    const sessionOrders = (session?.orderIds || []).map((id) => findOrderById(id)).filter(Boolean);
+    const shift = session ? `
+      <div class="today-shift is-on">
+        <div><strong>Turno en curso</strong> desde las ${sanitize(formatAttendanceTime(session.checkInAt))}${session.isPaused ? ' · <em>en pausa</em>' : ''}
+          <div class="small">${sessionOrders.length ? `Trabajando en ${sessionOrders.map((order) => sanitize(order.orderNumber || '-')).join(', ')}` : 'Sin OT marcadas: tu tiempo no se está repartiendo.'}</div></div>
+        <button class="btn btn-soft" data-view="attendance">Ir a Asistencia</button>
+      </div>` : `
+      <div class="today-shift">
+        <div><strong>Sin turno activo</strong><div class="small">Marca tu entrada y las OT en que vas a trabajar.</div></div>
+        <button class="btn btn-primary" data-view="attendance">Marcar entrada</button>
+      </div>`;
+    const machines = timers.length ? `
+      <div class="machine-timers">${timers.map((timer) => `
+        <div class="machine-timer">
+          <span class="machine-dot" aria-hidden="true"></span>
+          <span class="machine-text"><strong>${sanitize(timer.machine)}</strong><span>${sanitize(findOrderById(timer.orderId)?.orderNumber || 'Sin OT')}</span></span>
+          <span class="mono machine-elapsed" data-live-since="${sanitize(timer.startAt)}" data-live-base="0">00:00:00</span>
+          <button type="button" class="btn btn-soft btn-xs" data-action="stop-machine-timer" data-id="${sanitize(timer.id)}">⏹ Detener</button>
+        </div>`).join('')}</div>` : '';
+    const list = items.length ? `
+      <ul class="today-list">${items.map((item) => `
+        <li class="today-item tone-${item.tone} kind-${item.kind}">
+          <span class="today-dot" aria-hidden="true"></span>
+          <span class="today-text"><strong>${sanitize(item.title)}</strong><span>${sanitize(item.detail)}</span></span>
+          <button type="button" class="btn btn-soft btn-xs" ${item.action}>${item.cta}</button>
+        </li>`).join('')}
+      </ul>` : '<div class="today-empty">✓ Nada urgente para hoy: sin entregas en los próximos 7 días, cobros al día y gastos sin vencer.</div>';
+    return `
+      ${shift}
+      ${machines}
+      <div class="today-section-title">Pendientes <span class="ot-tab-count">${items.length}</span></div>
+      ${list}
+      ${renderSalesGoalBar()}
+    `;
+  }
+
+  // ---- Enlaces (Ajustes) ----
+  const LINK_GROUP_COLORS = { AndiWorks: 'var(--ink)', 'Banco y SII': 'var(--fam-money)', Proveedores: 'var(--fam-prod)', Redes: 'var(--fam-shop)' };
+
+  function getLinks() {
+    return Array.isArray(state.scenario?.links) ? state.scenario.links : [];
+  }
+
+  function normalizeLinkUrl(raw) {
+    const text = String(raw || '').trim();
+    if (!text) return '';
+    const withScheme = /^[a-z][a-z0-9+.-]*:/i.test(text) ? text : `https://${text}`;
+    return /^https?:\/\//i.test(withScheme) ? withScheme : '';
+  }
+
+  function shortUrl(url) {
+    return String(url || '').replace(/^https?:\/\/(www\.)?/i, '').replace(/\/$/, '');
+  }
+
+  function renderSidebarLinks() {
+    const box = document.getElementById('sidebar-links');
+    if (!box) return;
+    const pinned = getLinks().filter((link) => link.pinned);
+    box.innerHTML = pinned.length ? `
+      <span class="nav-group-title">Enlaces</span>
+      ${pinned.map((link) => `<a class="sidebar-link" href="${sanitize(link.url)}" target="_blank" rel="noopener noreferrer" title="${sanitize(shortUrl(link.url))}">${sanitize(link.name)} <span aria-hidden="true">↗</span></a>`).join('')}
+    ` : '';
+  }
+
+  function renderLinks() {
+    const links = getLinks();
+    const editing = links.find((link) => link.id === state.ui.editingLinkId) || null;
+    const groups = [...new Set([...Object.keys(LINK_GROUP_COLORS), ...links.map((link) => link.group)])];
+    const usedGroups = groups.filter((group) => links.some((link) => link.group === group));
+    const sections = usedGroups.map((group) => `
+      <section class="links-group" aria-label="${sanitize(group)}" style="--family:${LINK_GROUP_COLORS[group] || 'var(--muted)'}">
+        <h3 class="links-group-title"><span class="page-family-dot"></span>${sanitize(group)}</h3>
+        <div class="links-grid">
+          ${links.filter((link) => link.group === group).map((link) => `
+            <div class="link-card">
+              <span class="link-initial" aria-hidden="true">${sanitize(link.name.charAt(0).toUpperCase())}</span>
+              <a class="link-main" href="${sanitize(link.url)}" target="_blank" rel="noopener noreferrer"><strong>${sanitize(link.name)} ↗</strong><span class="mono">${sanitize(shortUrl(link.url))}</span></a>
+              <button type="button" class="link-star ${link.pinned ? 'is-on' : ''}" data-action="toggle-link-pin" data-id="${sanitize(link.id)}" aria-pressed="${link.pinned}" title="${link.pinned ? 'Quitar del menú' : 'Mostrar en el menú'}" aria-label="Mostrar en el menú">★</button>
+              <button type="button" class="btn btn-soft btn-icon btn-xs" data-action="edit-link" data-id="${sanitize(link.id)}" title="Editar" aria-label="Editar">${iconSvg('edit')}</button>
+              <button type="button" class="btn btn-soft btn-icon btn-xs" data-action="delete-link" data-id="${sanitize(link.id)}" title="Eliminar" aria-label="Eliminar">${iconSvg('trash')}</button>
+            </div>`).join('')}
+        </div>
+      </section>`).join('');
+    const pinnedCount = links.filter((link) => link.pinned).length;
+    return `
+      <div class="card">
+        ${renderPageHead('settings', 'Enlaces', `${links.length} enlace${links.length === 1 ? '' : 's'} · ${pinnedCount} en el menú lateral (★)`)}
+        <div class="links-layout">
+          <div class="links-list">${sections || '<div class="empty-state">Aún no hay enlaces. Agrega el primero con la ficha.</div>'}</div>
+          <aside class="links-form db-ficha">
+            <div class="form-title">${editing ? 'Editar enlace' : 'Nuevo enlace'}</div>
+            <div><label for="link-name">Nombre</label><input id="link-name" maxlength="60" value="${sanitize(editing?.name || '')}" placeholder="Ej.: Portal proveedores Sodimac" /></div>
+            <div><label for="link-url">Dirección (URL)</label><input id="link-url" class="mono" maxlength="300" value="${sanitize(editing?.url || '')}" placeholder="https://" /></div>
+            <div><label for="link-group">Grupo</label><input id="link-group" list="link-group-options" maxlength="40" value="${sanitize(editing?.group || 'AndiWorks')}" />
+              <datalist id="link-group-options">${groups.map((group) => `<option value="${sanitize(group)}"></option>`).join('')}</datalist></div>
+            <label class="links-pin-field"><input id="link-pinned" type="checkbox" ${editing?.pinned ? 'checked' : ''} /> Mostrar en el menú lateral</label>
+            <div class="inline-actions action-pair">
+              <button type="button" class="btn btn-primary" data-action="save-link">${editing ? 'Guardar cambios' : 'Guardar enlace'}</button>
+              ${editing ? '<button type="button" class="btn btn-soft" data-action="cancel-edit-link">Cancelar</button>' : ''}
+            </div>
+          </aside>
+        </div>
+      </div>
+    `;
+  }
+
+  function renderHome() {
+    const today = new Date();
+    const dateLabel = today.toLocaleDateString('es-CL', { weekday: 'long', day: 'numeric', month: 'long' });
+    return `
+      <div class="card home-card">
+        ${renderPageHead('home', '¿Qué tengo que hacer hoy?', `${dateLabel.charAt(0).toUpperCase()}${dateLabel.slice(1)} · entregas, cobros, documentos y gastos de los próximos 7 días`, '<button class="btn btn-primary" data-view="quote">+ Nueva OT</button>')}
+        ${renderTodayPanel()}
+      </div>
+    `;
+  }
 
   function renderMobileHome() {
     const groups = MOBILE_HOME_GROUPS.map((group) => `
@@ -11238,9 +12547,10 @@ Objetivo
           <img src="assets/logo/logoapp.svg" alt="" width="48" height="48" />
           <div>
             <h2>AndiApp</h2>
-            <p class="subtitle">Elige la sección a la que quieres ir.</p>
+            <p class="subtitle">Lo de hoy y todas las secciones.</p>
           </div>
         </div>
+        <div class="today-mobile">${renderTodayPanel()}</div>
         <div class="mobile-home-menu">${groups}</div>
       </div>
     `;
@@ -11275,13 +12585,7 @@ Objetivo
     const projection = calc.scenarioSummary.projection || {};
     return `
       <div class="card docs-card">
-        <div class="section-title">
-          <div>
-            <h2>Ayuda técnica</h2>
-            <p class="subtitle">Guía visual y compacta de módulos, criterios y fórmulas usadas por la aplicación.</p>
-          </div>
-          <span class="pill info">?</span>
-        </div>
+        ${renderPageHead('settings', 'Ayuda técnica', 'Guía compacta de módulos, criterios y fórmulas de la app.')}
 
         <div class="docs-compact">
           <details class="docs-section">
@@ -11345,61 +12649,81 @@ Objetivo
       finance: { exportAction: 'export-finance-base', importAction: 'import-finance-base', exportLabel: 'Descargar', importLabel: 'Importar' }
     };
 
+    // Familia (color) y cantidad de registros de cada base.
+    const baseMeta = {
+      scenario: ['settings', `${(state.scenario?.fixedCosts || []).length} costos fijos · ${(state.scenario?.links || []).length} enlaces`],
+      database: ['prod', `${(state.database?.materials || []).length} insumos`],
+      productTypes: ['prod', `${(state.database?.productTypes || []).length} tipos`],
+      external: ['prod', `${(state.database?.externalResources || []).length} proveedores`],
+      contacts: ['prod', `${(state.contacts || []).length} clientes`],
+      orders: ['prod', `${(state.orders || []).length} OT`],
+      desired: ['shop', `${(state.inventory?.desiredItems || []).length} equipos · ${(state.inventory?.wishItems || []).length} por comprar`],
+      expenses: ['money', `${(state.expenses?.cards || []).length} gastos fijos`],
+      attendance: ['shop', `${(state.attendance?.records || []).length} registros`],
+      finance: ['money', `${(state.finance?.entries || []).length} movimientos`]
+    };
     const tableRows = rows.map(([key, stamp]) => {
       const meta = actionByBase[key];
-      const fileName = key === 'inventoryCompany' ? 'EN_DESARROLLO' : getBackupFileName(key);
-      const actionsCell = key === 'inventoryCompany'
-        ? '<span class="small">En desarrollo</span>'
-        : `<div class="button-group compact-actions"><button class="btn btn-soft" ${meta.disabled ? 'disabled' : `data-action="${meta.importAction}"`}>${meta.importLabel}</button><button class="btn btn-primary" ${meta.disabled ? 'disabled' : `data-action="${meta.exportAction}"`}>${meta.exportLabel}</button></div>`;
-      const deleteCell = key === 'inventoryCompany'
-        ? '<span class="small">-</span>'
-        : `<button class="btn btn-soft btn-icon" data-action="delete-base-entry" data-base-key="${sanitize(key)}" title="Eliminar base" aria-label="Eliminar base ${sanitize(baseLabels[key])}">${iconSvg('trash')}</button>`;
+      const [family, count] = baseMeta[key] || ['settings', ''];
       return `
         <tr>
-          <td><strong>${sanitize(baseLabels[key])}</strong></td>
-          <td>${sanitize(formatBaseStatus(stamp))}</td>
-          <td>${actionsCell}</td>
-          <td><span class="small">${sanitize(fileName)}</span></td>
-          <td>${deleteCell}</td>
+          <td><span class="backup-base nav-group-${family}" title="Archivo: ${sanitize(getBackupFileName(key))}"><span class="page-family-dot"></span><strong>${sanitize(baseLabels[key])}</strong></span></td>
+          <td class="mono">${sanitize(count)}</td>
+          <td class="small">${stamp ? sanitize(formatBaseStatus(stamp)) : '—'}</td>
+          <td>
+            <div class="button-group compact-actions backup-actions">
+              <button class="btn btn-soft btn-xs" data-action="${meta.exportAction}">Descargar</button>
+              <button class="btn btn-soft btn-xs" data-action="${meta.importAction}">Importar</button>
+              <button class="btn btn-soft btn-icon btn-xs" data-action="delete-base-entry" data-base-key="${sanitize(key)}" title="Eliminar base" aria-label="Eliminar base ${sanitize(baseLabels[key])}">${iconSvg('trash')}</button>
+            </div>
+          </td>
         </tr>
       `;
     }).join('');
 
+    const sessionOn = !document.getElementById('session-panel')?.classList.contains('is-hidden');
+    const syncText = String(document.querySelector('.sync-badge span')?.textContent || '').replace('☁', '').trim();
+    const lastFull = state.ui.lastFullBackupAt ? new Date(state.ui.lastFullBackupAt) : null;
+    const daysSince = lastFull ? Math.floor((Date.now() - lastFull.getTime()) / 86400000) : null;
+    const backupTone = daysSince === null || daysSince > 7 ? 'warn' : 'good';
+    const lastFullText = lastFull
+      ? `Último respaldo completo en este equipo: ${daysSince === 0 ? 'hoy' : daysSince === 1 ? 'ayer' : `hace ${daysSince} días`} (${lastFull.toLocaleString('es-CL')})`
+      : 'Aún no descargas un respaldo completo desde este equipo';
+
     return `
       <div class="card">
-        <div class="section-title">
+        ${renderPageHead('settings', 'Respaldo', `${sessionOn ? 'Tus datos están en la nube y en este equipo' : 'Tus datos están guardados solo en este navegador'} ${renderSaveFeedback('backup')}`, `
+          <button class="btn btn-soft" data-action="import-all-bases">Importar respaldo</button>
+          <button class="btn btn-soft" data-action="export-all-bases-zip">ZIP por módulo</button>
+          <button class="btn btn-primary" data-action="export-full-database">Descargar todo</button>`)}
+
+        <div class="backup-status tone-${backupTone}">
+          <img src="assets/logo/logoapp.svg" alt="" width="56" height="56" />
           <div>
-            <h2>Central de respaldo</h2>
-            <p class="subtitle">Controla importación y descarga de todas las bases de la app en un solo lugar. Usa "Guardar Bases" en la parte superior para asegurar el respaldo de todas las bases.</p>
-            ${renderSaveFeedback('backup')}
+            <span class="backup-sync ${sessionOn ? '' : 'is-local'}"><span class="page-family-dot"></span>${sessionOn ? `Sincronizado con la nube${syncText ? ` · ${sanitize(syncText)}` : ''}` : 'Sin sesión en la nube: solo este navegador'}</span>
+            <strong class="backup-last">${sanitize(lastFullText)}</strong>
+            <span class="small">${backupTone === 'warn' ? 'Te recomiendo descargar todo ahora: un respaldo semanal en tu computador es la segunda copia por si algo falla.' : 'Bien. Un respaldo semanal en tu computador es la segunda copia por si algo falla.'}</span>
           </div>
         </div>
+      </div>
 
+      <div class="card">
+        <div class="section-title"><h3>Bases de datos</h3><span class="pill ok">${rows.length} bases</span></div>
         <div class="table-wrap table-compact">
-          <table>
-            <thead>
-              <tr>
-                <th>Base</th>
-                <th>Última actualización</th>
-                <th>Acciones</th>
-                <th>Nombre de respaldo</th>
-                <th>Eliminar</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${tableRows}
-            </tbody>
+          <table class="backup-table">
+            <thead><tr><th>Base</th><th>Registros</th><th>Último cambio</th><th>Acciones</th></tr></thead>
+            <tbody>${tableRows}</tbody>
           </table>
         </div>
+        <p class="help">«Descargar todo» genera un único archivo con todas las secciones; «ZIP por módulo», un archivo por base. Para una OT individual usa el Presupuestador.</p>
+      </div>
 
+      <div class="card backup-danger">
+        <div class="section-title"><div><h3>Acciones delicadas</h3><p class="subtitle">Úsalas solo si sabes lo que haces. Antes, descarga todo.</p></div></div>
         <div class="inline-actions">
-          <button class="btn btn-primary" data-action="export-full-database">Descargar BASE COMPLETA (1 archivo)</button>
-          <button class="btn btn-soft" data-action="export-all-bases-zip">Descarga total (ZIP por módulo)</button>
-          <button class="btn btn-soft" data-action="import-all-bases">Importar respaldo (BASE COMPLETA o ZIP)</button>
           <button class="btn btn-soft" data-action="recover-desktop-attachments">Recuperar adjuntos de la app de escritorio</button>
           <button class="btn btn-danger" data-action="delete-all-bases">Eliminar todas las bases</button>
         </div>
-        <p class="help">«Descargar BASE COMPLETA» genera un único archivo JSON con TODAS las secciones (Escenario, Presupuestador, Base de datos, Clientes, Panel OT, Inventario, Gastos, Asistencia y Finanzas). La Base OT corresponde al panel completo de órdenes guardadas en el sistema; en Presupuestador puedes seguir descargando una OT individual cuando lo necesites.</p>
       </div>
     `;
   }
@@ -11843,50 +13167,73 @@ Objetivo
 
     // Month options for filter dropdown removed
 
+    // Etapa 2: tres pestañas. Movimientos = libro a la izquierda + ficha para ingresar o corregir a la derecha.
+    const financeTabs = [['mov', 'Movimientos'], ['res', 'Resumen y gráficos'], ['saldos', 'Saldos y PDF']];
+    const financeTab = financeTabs.some((item) => item[0] === state.ui.financeTab) ? state.ui.financeTab : 'mov';
     return `
       <div class="card">
-        <div class="section-title">
+        <div class="section-title page-head">
           <div>
-            <h2>Módulo 9 · Finanzas</h2>
-            <p class="subtitle">Registro de movimientos, flujo de caja y cálculo de IVA para F29.</p>
+            <span class="page-family nav-group-money">Dinero</span>
+            <h2>Finanzas</h2>
+            <p class="subtitle">Saldo actual <strong class="mono">${formatCurrency(currentBalance)}</strong> · ${allEntries.length} movimiento${allEntries.length !== 1 ? 's' : ''} · flujo de caja e IVA para F29</p>
           </div>
         </div>
 
-        <!-- Saldo inicial -->
-        ${(() => {
-          const locked = !!state.finance.initialBalanceLocked;
-          return `<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap;padding:10px 14px;background:var(--panel-soft);border:1px solid var(--line);border-radius:8px;">
-            <label style="font-size:12px;font-weight:600;color:var(--muted);">Saldo inicial de cuenta</label>
-            <input type="text" data-format="clp" id="finance-initial-balance" style="width:160px;${locked ? 'opacity:0.6;' : ''}" value="${formatNumber(state.finance.initialBalance || 0)}" min="0" step="1" ${locked ? 'disabled' : ''} />
-            ${locked
-              ? `<button class="btn btn-soft" data-action="toggle-finance-balance-lock" title="Desbloquear para editar" style="display:flex;align-items:center;gap:5px;">■ Desbloquear</button>`
-              : `<button class="btn btn-soft" data-action="save-finance-initial-balance">Guardar y bloquear</button>`
-            }
-            <span class="help" style="margin:0;">El saldo inicial más todos los movimientos define el saldo actual.
-              ${locked ? '<span style="color:#16a34a;font-weight:600;"> ✓ Bloqueado</span>' : '<span style="color:#d97706;"> (sin bloquear)</span>'}
-            </span>
-          </div>`;
-        })()}
+        ${renderFinanceInsights()}
 
-        <!-- Crédito fiscal de IVA inicial (previo a usar la app) -->
-        ${(() => {
-          const locked = !!state.finance.ivaCreditBalanceLocked;
-          return `<div style="display:flex;align-items:center;gap:10px;margin-bottom:16px;flex-wrap:wrap;padding:10px 14px;background:var(--panel-soft);border:1px solid var(--line);border-radius:8px;">
-            <label class="label-with-tip" style="font-size:12px;font-weight:600;color:var(--muted);">
-              <span>Crédito fiscal IVA inicial (antes de usar la app)</span>
-              ${renderInfoTip('AndiApp no está conectada al SII, así que no conoce el crédito fiscal que ya tenías acumulado antes de empezar a registrar movimientos aquí (por ejemplo, IVA de una construcción o compra grande previa). Ingresa aquí ese saldo una sola vez -revísalo en tu Carpeta Tributaria de sii.cl o con tu contador- y la app lo va descontando automáticamente mes a mes contra tu IVA débito, junto con el crédito que sí registres en Finanzas.')}
-            </label>
-            <input type="text" data-format="clp" id="finance-iva-credit-balance" style="width:160px;${locked ? 'opacity:0.6;' : ''}" value="${formatNumber(state.finance.ivaCreditBalance || 0)}" min="0" step="1" ${locked ? 'disabled' : ''} />
-            ${locked
-              ? `<button class="btn btn-soft" data-action="toggle-finance-iva-credit-lock" title="Desbloquear para editar" style="display:flex;align-items:center;gap:5px;">■ Desbloquear</button>`
-              : `<button class="btn btn-soft" data-action="save-finance-iva-credit-balance">Guardar y bloquear</button>`
-            }
-            <span class="help" style="margin:0;">Remanente de crédito fiscal disponible hoy: <strong>${formatCurrency(ivaLedger.currentRemanente)}</strong>.
-              ${locked ? '<span style="color:#16a34a;font-weight:600;"> ✓ Bloqueado</span>' : '<span style="color:#d97706;"> (sin bloquear)</span>'}
-            </span>
-          </div>`;
-        })()}
+        <div class="page-tabs" role="tablist" aria-label="Vistas de Finanzas">
+          ${financeTabs.map(([key, label]) => `<button type="button" role="tab" class="page-tab ${financeTab === key ? 'active' : ''}" aria-selected="${financeTab === key}" data-action="set-finance-tab" data-tab="${key}">${label}</button>`).join('')}
+        </div>
 
+        ${financeTab === 'mov' ? `
+        <div class="fin-mov-layout">
+          <div class="fin-mov-ledger">
+        <!-- Ledger Table -->
+        <div class="table-wrap table-compact finance-ledger-wrap">
+          <table>
+            <thead>
+              <tr class="finance-ledger-columns-row">
+                <th>Fecha</th>
+                <th>Categoría</th>
+                <th title="OT asociada / Tipo de gasto">Tipo</th>
+                <th style="text-align:center;width:42px;" title="Boleta/Factura">Doc.</th>
+                <th>Título / Detalle</th>
+                <th>Ingreso</th>
+                <th>Egreso</th>
+                <th>Saldo banco</th>
+                <th>IVA</th>
+                <th>Acciones</th>
+              </tr>
+              ${displayRunningRows.length > 0 ? `
+              <tr class="finance-sticky-total-row">
+                <th colspan="5"><span class="finance-total-label">Totales globales</span></th>
+                <th class="finance-income-cell"><strong>${formatCurrency(displayMonthSummary.totalIncome)}</strong></th>
+                <th class="finance-expense-cell"><strong>${formatCurrency(displayMonthSummary.totalExpense)}</strong></th>
+                <th class="finance-balance-cell ${currentBalance < 0 ? 'negative' : ''}"><strong>${formatCurrency(currentBalance)}</strong></th>
+                <th></th>
+                <th></th>
+              </tr>` : ''}
+            </thead>
+            <tbody>
+              ${displayRunningRows.length === 0
+    ? `<tr><td colspan="10" style="text-align:center;color:var(--muted);padding:24px;">Sin movimientos registrados. Agrega el primero arriba.</td></tr>`
+    : ledgerRows}
+            </tbody>
+            ${displayRunningRows.length > 0 && totalPages > 1 ? `
+            <tfoot class="table-total">
+              <tr style="font-size:12px;opacity:0.8;">
+                <td colspan="5" style="font-size:12px;">Subtotal página ${state.ui.financePage + 1} / ${totalPages}</td>
+                <td class="finance-income-cell">${formatCurrency(pageSubtotalIncome)}</td>
+                <td class="finance-expense-cell">${formatCurrency(pageSubtotalExpense)}</td>
+                <td></td><td colspan="2"></td>
+              </tr>
+            </tfoot>` : ''}
+          </table>
+        </div>
+
+          </div>
+          <aside class="fin-mov-form" aria-label="Ficha del movimiento">
         <!-- New Entry Form -->
         <div class="finance-entry-form">
           <div class="form-title">${state.ui.financeEditingEntryId ? 'Editar movimiento' : 'Nuevo movimiento'}</div>
@@ -11965,49 +13312,10 @@ Objetivo
           </div>
         </div>
 
-        <!-- Ledger Table -->
-        <div class="table-wrap table-compact finance-ledger-wrap">
-          <table>
-            <thead>
-              <tr class="finance-ledger-columns-row">
-                <th>Fecha</th>
-                <th>Categoría</th>
-                <th title="OT asociada / Tipo de gasto">Tipo</th>
-                <th style="text-align:center;width:42px;" title="Boleta/Factura">Doc.</th>
-                <th>Título / Detalle</th>
-                <th>Ingreso</th>
-                <th>Egreso</th>
-                <th>Saldo banco</th>
-                <th>IVA</th>
-                <th>Acciones</th>
-              </tr>
-              ${displayRunningRows.length > 0 ? `
-              <tr class="finance-sticky-total-row">
-                <th colspan="5"><span class="finance-total-label">Totales globales</span></th>
-                <th class="finance-income-cell"><strong>${formatCurrency(displayMonthSummary.totalIncome)}</strong></th>
-                <th class="finance-expense-cell"><strong>${formatCurrency(displayMonthSummary.totalExpense)}</strong></th>
-                <th class="finance-balance-cell ${currentBalance < 0 ? 'negative' : ''}"><strong>${formatCurrency(currentBalance)}</strong></th>
-                <th></th>
-                <th></th>
-              </tr>` : ''}
-            </thead>
-            <tbody>
-              ${displayRunningRows.length === 0
-    ? `<tr><td colspan="10" style="text-align:center;color:var(--muted);padding:24px;">Sin movimientos registrados. Agrega el primero arriba.</td></tr>`
-    : ledgerRows}
-            </tbody>
-            ${displayRunningRows.length > 0 && totalPages > 1 ? `
-            <tfoot class="table-total">
-              <tr style="font-size:12px;opacity:0.8;">
-                <td colspan="5" style="font-size:12px;">Subtotal página ${state.ui.financePage + 1} / ${totalPages}</td>
-                <td class="finance-income-cell">${formatCurrency(pageSubtotalIncome)}</td>
-                <td class="finance-expense-cell">${formatCurrency(pageSubtotalExpense)}</td>
-                <td></td><td colspan="2"></td>
-              </tr>
-            </tfoot>` : ''}
-          </table>
-        </div>
+          </aside>
+        </div>` : ''}
 
+        ${financeTab === 'res' ? `
         <!-- Indicadores globales -->
         <details class="finance-section-details" open>
           <summary>Indicadores globales <span style="font-weight:400;font-size:11px;margin-left:6px;">mes actual · histórico</span></summary>
@@ -12321,6 +13629,44 @@ Objetivo
           </details>`;
         })()}
 
+        ` : ''}
+
+        ${financeTab === 'saldos' ? `
+        <!-- Saldo inicial -->
+        ${(() => {
+          const locked = !!state.finance.initialBalanceLocked;
+          return `<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap;padding:10px 14px;background:var(--panel-soft);border:1px solid var(--line);border-radius:8px;">
+            <label style="font-size:12px;font-weight:600;color:var(--muted);">Saldo inicial de cuenta</label>
+            <input type="text" data-format="clp" id="finance-initial-balance" style="width:160px;${locked ? 'opacity:0.6;' : ''}" value="${formatNumber(state.finance.initialBalance || 0)}" min="0" step="1" ${locked ? 'disabled' : ''} />
+            ${locked
+              ? `<button class="btn btn-soft" data-action="toggle-finance-balance-lock" title="Desbloquear para editar" style="display:flex;align-items:center;gap:5px;">■ Desbloquear</button>`
+              : `<button class="btn btn-soft" data-action="save-finance-initial-balance">Guardar y bloquear</button>`
+            }
+            <span class="help" style="margin:0;">El saldo inicial más todos los movimientos define el saldo actual.
+              ${locked ? '<span style="color:#16a34a;font-weight:600;"> ✓ Bloqueado</span>' : '<span style="color:#d97706;"> (sin bloquear)</span>'}
+            </span>
+          </div>`;
+        })()}
+
+        <!-- Crédito fiscal de IVA inicial (previo a usar la app) -->
+        ${(() => {
+          const locked = !!state.finance.ivaCreditBalanceLocked;
+          return `<div style="display:flex;align-items:center;gap:10px;margin-bottom:16px;flex-wrap:wrap;padding:10px 14px;background:var(--panel-soft);border:1px solid var(--line);border-radius:8px;">
+            <label class="label-with-tip" style="font-size:12px;font-weight:600;color:var(--muted);">
+              <span>Crédito fiscal IVA inicial (antes de usar la app)</span>
+              ${renderInfoTip('AndiApp no está conectada al SII, así que no conoce el crédito fiscal que ya tenías acumulado antes de empezar a registrar movimientos aquí (por ejemplo, IVA de una construcción o compra grande previa). Ingresa aquí ese saldo una sola vez -revísalo en tu Carpeta Tributaria de sii.cl o con tu contador- y la app lo va descontando automáticamente mes a mes contra tu IVA débito, junto con el crédito que sí registres en Finanzas.')}
+            </label>
+            <input type="text" data-format="clp" id="finance-iva-credit-balance" style="width:160px;${locked ? 'opacity:0.6;' : ''}" value="${formatNumber(state.finance.ivaCreditBalance || 0)}" min="0" step="1" ${locked ? 'disabled' : ''} />
+            ${locked
+              ? `<button class="btn btn-soft" data-action="toggle-finance-iva-credit-lock" title="Desbloquear para editar" style="display:flex;align-items:center;gap:5px;">■ Desbloquear</button>`
+              : `<button class="btn btn-soft" data-action="save-finance-iva-credit-balance">Guardar y bloquear</button>`
+            }
+            <span class="help" style="margin:0;">Remanente de crédito fiscal disponible hoy: <strong>${formatCurrency(ivaLedger.currentRemanente)}</strong>.
+              ${locked ? '<span style="color:#16a34a;font-weight:600;"> ✓ Bloqueado</span>' : '<span style="color:#d97706;"> (sin bloquear)</span>'}
+            </span>
+          </div>`;
+        })()}
+
         <!-- Imprimir PDF -->
         <div style="margin-top:24px;padding-top:16px;border-top:2px solid var(--line);display:flex;align-items:center;justify-content:flex-end;gap:10px;">
           <span style="font-size:11px;color:var(--muted);">${allEntries.length} movimiento${allEntries.length !== 1 ? 's' : ''} · Tamaño carta</span>
@@ -12328,6 +13674,8 @@ Objetivo
             ⎙ Imprimir / Guardar PDF
           </button>
         </div>
+
+        ` : ''}
 
       </div>
     `;
@@ -12456,6 +13804,88 @@ Objetivo
     out += `<text x="${padL + chartW}" y="${axisY}" text-anchor="end" font-size="7" fill="#cccccc" font-family="IBM Plex Mono,monospace">día del mes →</text>`;
 
     return `<svg class="fin-chart-svg" viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;display:block;" xmlns="http://www.w3.org/2000/svg">${out}</svg>`;
+  }
+
+  // OT abiertas (no entregadas) para repartir el tiempo del turno.
+  function getAttendanceOpenOrders() {
+    return (state.orders || []).filter((order) => !isDeliveryCompleted(order.deliveryState || order.quote?.deliveryState));
+  }
+
+  function renderAttendanceOrdersSection(activeSession) {
+    const orders = getAttendanceOpenOrders();
+    const selected = (activeSession ? activeSession.orderIds || [] : state.ui.attendanceOrderIds || []).map(String);
+    const running = Boolean(activeSession && !activeSession.isPaused);
+    const share = selected.length || 1;
+    const chips = orders.map((order) => {
+      const id = String(order.id);
+      const on = selected.includes(id);
+      const base = Number(activeSession?.orderTimeMs?.[id]) || 0;
+      const live = on && running && activeSession.orderAllocSince
+        ? `data-live-since="${sanitize(activeSession.orderAllocSince)}" data-live-base="${base}" data-live-div="${share}"`
+        : '';
+      return `
+        <button type="button" class="att-ot-chip ${on ? 'is-on' : ''}" data-action="toggle-attendance-order" data-id="${sanitize(id)}" aria-pressed="${on}">
+          <span class="att-ot-check" aria-hidden="true">${on ? '✓' : '+'}</span>
+          <span class="att-ot-text"><strong>${sanitize(order.orderNumber || '-')}</strong><span>${sanitize(order.orderTitle || 'Orden sin título')}</span></span>
+          ${activeSession && (on || base) ? `<span class="att-ot-time mono" ${live}>${formatDurationFromMs(base)}</span>` : ''}
+        </button>`;
+    }).join('');
+    const note = !selected.length
+      ? 'Marca una o varias OT y tu tiempo se repartirá entre ellas mientras el turno corre.'
+      : `Tu tiempo se reparte en partes iguales: ${selected.length === 1 ? 'todo a 1 OT' : `1/${selected.length} a cada una`}.${activeSession?.isPaused ? ' En pausa no suma.' : ''}`;
+    return `
+      <div class="form-section">
+        <div class="form-section-title"><span class="form-step">2</span> OT en las que estás trabajando</div>
+        ${orders.length ? `<div class="att-ot-grid">${chips}</div><p class="help">${note}</p>` : '<p class="help">No hay OT abiertas. Las OT entregadas no aparecen aquí.</p>'}
+      </div>`;
+  }
+
+  function renderMachineTimersSection() {
+    const timers = normalizeMachineTimers(state.attendance?.machineTimers);
+    const records = normalizeMachineRecords(state.attendance?.machineRecords);
+    const orders = getAttendanceOpenOrders();
+    const machineNames = [...new Set([
+      ...records.map((item) => item.machine),
+      ...(state.inventory?.desiredItems || []).map((item) => String(item.name || '').trim()).filter(Boolean)
+    ])].sort((a, b) => a.localeCompare(b, 'es'));
+    const orderLabel = (id) => {
+      const order = findOrderById(id);
+      return order ? `${order.orderNumber || '-'} · ${order.orderTitle || ''}` : 'Sin OT';
+    };
+    const running = timers.map((timer) => `
+      <div class="machine-timer">
+        <span class="machine-dot" aria-hidden="true"></span>
+        <span class="machine-text"><strong>${sanitize(timer.machine)}</strong><span>${sanitize(orderLabel(timer.orderId))}</span></span>
+        <span class="mono machine-elapsed" data-live-since="${sanitize(timer.startAt)}" data-live-base="0">00:00:00</span>
+        <button type="button" class="btn btn-soft btn-xs" data-action="stop-machine-timer" data-id="${sanitize(timer.id)}">⏹ Detener</button>
+      </div>`).join('');
+    const recent = records.slice(0, 8).map((item) => `
+      <tr>
+        <td class="small">${sanitize(formatAttendanceTime(item.startAt))}</td>
+        <td><strong>${sanitize(item.machine)}</strong></td>
+        <td>${sanitize(orderLabel(item.orderId))}</td>
+        <td class="mono">${formatDurationFromMs(item.ms)}</td>
+        <td><button type="button" class="btn btn-soft btn-icon btn-xs" data-action="delete-machine-record" data-id="${sanitize(item.id)}" title="Eliminar" aria-label="Eliminar">${iconSvg('trash')}</button></td>
+      </tr>`).join('');
+    return `
+      <div class="form-section">
+        <div class="form-section-title"><span class="form-step">3</span> Máquinas</div>
+        <div class="database-grid database-grid-3 compact-grid align-end">
+          <div>
+            <label>Máquina</label>
+            <input id="machine-name" list="machine-name-options" value="${sanitize(state.ui.lastMachineName || '')}" placeholder="Ej.: Láser CO2" maxlength="60" />
+            <datalist id="machine-name-options">${machineNames.map((name) => `<option value="${sanitize(name)}"></option>`).join('')}</datalist>
+          </div>
+          <div>
+            <label>OT</label>
+            <select id="machine-order"><option value="">Sin OT</option>${orders.map((order) => `<option value="${sanitize(order.id)}">${sanitize(order.orderNumber || '-')} · ${sanitize(order.orderTitle || '')}</option>`).join('')}</select>
+          </div>
+          <div><button type="button" class="btn btn-primary" data-action="start-machine-timer">● Iniciar máquina</button></div>
+        </div>
+        <p class="help">Corre aparte de tu turno: puedes tener varias máquinas andando a la vez, cada una ligada a su OT.</p>
+        ${running ? `<div class="machine-timers">${running}</div>` : ''}
+        ${recent ? `<div class="table-wrap table-compact"><table><thead><tr><th>Inicio</th><th>Máquina</th><th>OT</th><th>Tiempo</th><th></th></tr></thead><tbody>${recent}</tbody></table></div>` : ''}
+      </div>`;
   }
 
   function renderAttendanceModule() {
@@ -12630,13 +14060,7 @@ Objetivo
 
     return `
       <div class="card">
-        <div class="section-title">
-          <div>
-            <h2>Módulo 8 · Registro de asistencia</h2>
-            <p class="subtitle">Marca hora de entrada y salida para registrar tus jornadas de trabajo.</p>
-          </div>
-          <span class="pill ${activeSession ? 'warn' : 'ok'}">${activeSession ? 'Turno en curso' : 'Sin turno activo'}</span>
-        </div>
+        ${renderPageHead('shop', 'Asistencia', `${totalRecords} registro${totalRecords === 1 ? '' : 's'} en ${totalDays} día${totalDays === 1 ? '' : 's'} · marca entrada y salida de cada jornada`, `<span class="pill ${activeSession ? 'warn' : 'ok'}">${activeSession ? 'Turno en curso' : 'Sin turno activo'}</span>`)}
 
         <div class="database-form-layout">
           <div class="form-section">
@@ -12667,6 +14091,8 @@ Objetivo
 
             ${activeSession ? `<p class="help attendance-live-status">Turno activo de <strong>${sanitize(activeSession.employeeName)}</strong> iniciado a las ${sanitize(formatAttendanceTime(activeSession.checkInAt))}. Estado: <strong>${activeSession.isPaused ? 'en pausa' : 'trabajando'}</strong>${activeSession.pauseCount ? ` · Pausas: ${activeSession.pauseCount}` : ''}.</p>` : ''}
           </div>
+          ${renderAttendanceOrdersSection(activeSession)}
+          ${renderMachineTimersSection()}
         </div>
       </div>
 
@@ -12747,18 +14173,156 @@ Objetivo
     `;
   }
 
+  // ---- Inventario: equipos (con mantención) y lista "Quiero comprar" ----
+  function getEquipmentMaintenance(item) {
+    const every = Number(item?.maintenanceEveryDays) || 0;
+    if (!every) return null;
+    const base = item.lastMaintenanceDate || item.purchaseDate || item.entryDate;
+    if (!base) return null;
+    const [y, m, d] = String(base).split('-').map(Number);
+    const next = toLocalDateValue(new Date(y, (m || 1) - 1, (d || 1) + every));
+    const days = daysUntil(next);
+    return { next, days, every, used: Math.min(1, Math.max(0, 1 - days / every)) };
+  }
+
+  function normalizeWishItem(item = {}) {
+    return {
+      id: item.id || uid('wish'),
+      name: String(item.name || '').trim(),
+      priority: ['alta', 'media', 'baja'].includes(item.priority) ? item.priority : 'media',
+      why: String(item.why || ''),
+      createdAt: item.createdAt || toLocalDateValue(new Date()),
+      offers: (Array.isArray(item.offers) ? item.offers : []).map((offer) => ({
+        id: offer.id || uid('woff'),
+        store: String(offer.store || ''),
+        url: normalizeLinkUrl(offer.url),
+        price: Math.max(0, Number(offer.price) || 0)
+      }))
+    };
+  }
+
+  function getSelectedWishItem() {
+    const list = state.inventory?.wishItems || [];
+    return list.find((item) => item.id === state.ui.selectedWishId) || list[0] || null;
+  }
+
+  // Lee la ficha de compra en pantalla y la guarda en el ítem seleccionado.
+  function collectWishForm() {
+    const item = getSelectedWishItem();
+    const nameInput = document.getElementById('wish-name');
+    if (!item || !nameInput) return item;
+    item.name = String(nameInput.value || '').trim() || item.name;
+    item.priority = document.getElementById('wish-priority')?.value || item.priority;
+    item.why = String(document.getElementById('wish-why')?.value || '');
+    item.offers = item.offers.map((offer) => {
+      const row = document.querySelector(`[data-wish-offer="${offer.id}"]`);
+      if (!row) return offer;
+      return {
+        ...offer,
+        store: String(row.querySelector('.wish-offer-store')?.value || '').trim(),
+        url: normalizeLinkUrl(row.querySelector('.wish-offer-url')?.value),
+        price: Math.max(0, Number(String(row.querySelector('.wish-offer-price')?.value || '').replace(/\./g, '').replace(/,/g, '.')) || 0)
+      };
+    });
+    return item;
+  }
+
+  function getBestWishOffer(item) {
+    const priced = (item?.offers || []).filter((offer) => offer.price > 0);
+    return priced.length ? priced.reduce((best, offer) => (offer.price < best.price ? offer : best)) : null;
+  }
+
+  // Disponible para comprar: caja de hoy menos los gastos fijos sin pagar de los próximos 30 días.
+  function getCashAvailableForPurchases() {
+    const rows = getFinanceRunningRows(state.finance?.entries || [], state.finance?.initialBalance || 0);
+    const cash = rows.length ? rows[rows.length - 1].runningBalance : Number(state.finance?.initialBalance || 0);
+    const committed = getExpenseDueList(30).reduce((acc, item) => acc + (Number(item.entry.amount) || 0), 0);
+    return { cash, committed, free: cash - committed };
+  }
+
+  function renderWishSection() {
+    const list = state.inventory?.wishItems || [];
+    const item = getSelectedWishItem();
+    const priorityLabel = { alta: 'Alta', media: 'Media', baja: 'Baja' };
+    const listHtml = list.map((wish) => {
+      const best = getBestWishOffer(wish);
+      return `
+        <button type="button" class="wish-row ${item && wish.id === item.id ? 'is-selected' : ''}" data-action="select-wish-item" data-id="${sanitize(wish.id)}">
+          <span class="wish-prio prio-${wish.priority}" title="Prioridad ${priorityLabel[wish.priority]}"></span>
+          <span class="wish-text"><strong>${sanitize(wish.name)}</strong><span>Prioridad ${priorityLabel[wish.priority].toLowerCase()} · ${wish.offers.length} oferta${wish.offers.length === 1 ? '' : 's'}</span></span>
+          <span class="mono">${best ? formatCurrency(best.price) : '—'}</span>
+        </button>`;
+    }).join('');
+    let ficha = '<div class="empty-state">Agrega lo que quieres comprar con "+ Algo que quiero comprar" y compara ofertas antes de decidir.</div>';
+    if (item) {
+      const best = getBestWishOffer(item);
+      const priced = item.offers.filter((offer) => offer.price > 0);
+      const maxPrice = priced.length ? Math.max(...priced.map((offer) => offer.price)) : 0;
+      const money = getCashAvailableForPurchases();
+      const ratio = best && money.free > 0 ? best.price / money.free : (best ? Infinity : 0);
+      const afford = !best ? null
+        : ratio <= 0.5 ? { tone: 'good', text: 'Sí, usa menos de la mitad de lo disponible.' }
+          : ratio <= 1 ? { tone: 'warn', text: `Alcanza, pero usa el ${Math.round(ratio * 100)} % de lo disponible.` }
+            : { tone: 'bad', text: 'Hoy no alcanza sin descuidar los gastos fijos.' };
+      ficha = `
+        <div class="wish-ficha">
+          <div class="database-grid database-grid-2 compact-grid">
+            <div><label for="wish-name">¿Qué quieres comprar?</label><input id="wish-name" maxlength="80" value="${sanitize(item.name)}" /></div>
+            <div><label for="wish-priority">Prioridad</label><select id="wish-priority">${['alta', 'media', 'baja'].map((p) => `<option value="${p}" ${item.priority === p ? 'selected' : ''}>${priorityLabel[p]}</option>`).join('')}</select></div>
+          </div>
+          <div><label for="wish-why">¿Por qué lo necesitas?</label><input id="wish-why" maxlength="200" value="${sanitize(item.why)}" placeholder="Ej.: el extractor actual no da abasto con el acrílico" /></div>
+          <div class="ot-preview-section-title">Ofertas</div>
+          ${best && priced.length > 1 ? `<div class="wish-verdict">La mejor oferta es <strong>${sanitize(best.store || 'sin nombre')}</strong>: ${formatCurrency(maxPrice - best.price)} menos que la más cara.</div>` : ''}
+          <div class="wish-offers">
+            ${item.offers.map((offer) => `
+              <div class="wish-offer ${best && offer.id === best.id ? 'is-best' : ''}" data-wish-offer="${sanitize(offer.id)}">
+                <input class="wish-offer-store" maxlength="60" value="${sanitize(offer.store)}" placeholder="Tienda" aria-label="Tienda" />
+                <input class="wish-offer-url mono" maxlength="300" value="${sanitize(offer.url)}" placeholder="https:// (opcional)" aria-label="Enlace" />
+                <input class="wish-offer-price mono" type="text" data-format="clp" value="${formatNumber(offer.price || 0)}" aria-label="Precio" />
+                ${offer.url ? `<a class="btn btn-soft btn-icon btn-xs" href="${sanitize(offer.url)}" target="_blank" rel="noopener noreferrer" title="Abrir oferta" aria-label="Abrir oferta">↗</a>` : '<span></span>'}
+                <button type="button" class="btn btn-soft btn-icon btn-xs" data-action="remove-wish-offer" data-offer-id="${sanitize(offer.id)}" title="Quitar oferta" aria-label="Quitar oferta">${iconSvg('close')}</button>
+                ${maxPrice && offer.price > 0 ? `<span class="wish-offer-bar"><span style="width:${(offer.price / maxPrice * 100).toFixed(0)}%"></span></span>` : ''}
+              </div>`).join('')}
+          </div>
+          <div><button type="button" class="btn btn-soft btn-xs" data-action="add-wish-offer">+ Agregar oferta</button></div>
+          <div class="wish-afford ${afford ? `tone-${afford.tone}` : ''}">
+            <div class="ot-preview-section-title">¿Me alcanza?</div>
+            <div class="small">Caja hoy ${formatCurrency(money.cash)} − gastos fijos de los próximos 30 días ${formatCurrency(money.committed)} = <strong>${formatCurrency(money.free)} disponibles</strong></div>
+            ${afford ? `<div class="ot-paid-bar"><span style="width:${Math.min(100, ratio * 100).toFixed(0)}%"></span></div><strong>${afford.text}</strong>` : '<div class="small">Ingresa al menos un precio para saberlo.</div>'}
+          </div>
+          <div class="inline-actions action-pair">
+            <button type="button" class="btn btn-primary" data-action="save-wish-item">Guardar</button>
+            <button type="button" class="btn btn-soft" data-action="buy-wish-item" ${best ? '' : 'disabled'}>Lo compré</button>
+            <button type="button" class="btn btn-danger" data-action="delete-wish-item">${iconSvg('trash')} Quitar</button>
+          </div>
+        </div>`;
+    }
+    return `
+      <div class="wish-layout">
+        <div class="card wish-list">
+          <div class="section-title"><h3>Lista de compras</h3><span class="pill ok">${list.length}</span></div>
+          ${listHtml || '<div class="small">Vacía.</div>'}
+        </div>
+        <div class="card db-ficha">${ficha}</div>
+      </div>`;
+  }
+
   function renderInventory() {
+    const items = state.inventory?.desiredItems || [];
+    const wish = state.inventory?.wishItems || [];
+    const tab = state.ui.inventoryTab === 'wish' ? 'wish' : 'equip';
+    const totalValue = items.reduce((acc, item) => acc + (Number(item.cost) || 0), 0);
+    const attention = items.filter((item) => /reparación|baja/i.test(item.status || '') || ((getEquipmentMaintenance(item)?.days ?? 99) <= 7)).length;
+    const subtitle = `${items.length} equipo${items.length === 1 ? '' : 's'} · valor ${formatCurrency(totalValue)}${attention ? ` · <strong class="is-bad">${attention} requiere${attention === 1 ? '' : 'n'} atención</strong>` : ''} · ${wish.length} en la lista de compras`;
+    const action = tab === 'equip'
+      ? '<button class="btn btn-primary" data-action="open-desired-form">+ Equipo</button>'
+      : '<button class="btn btn-primary" data-action="new-wish-item">+ Algo que quiero comprar</button>';
     return `
       <div class="card">
-        <div class="section-title">
-          <div>
-            <h2>Módulo 6 · Inventario</h2>
-            <p class="subtitle">Registro del inventario completo del galpón: equipos, herramientas y activos.</p>
-          </div>
-        </div>
+        ${renderPageHead('shop', 'Inventario', subtitle, action)}
+        ${renderPageTabs([['equip', `Equipos del taller <span class="ot-tab-count">${items.length}</span>`], ['wish', `Quiero comprar <span class="ot-tab-count">${wish.length}</span>`]], tab, 'set-inventory-tab', 'Vistas de Inventario')}
       </div>
-
-      ${renderDesiredEquipmentSection()}
+      ${tab === 'equip' ? renderDesiredEquipmentSection() : renderWishSection()}
     `;
   }
 
@@ -12772,16 +14336,15 @@ Objetivo
   const SVG_COMMENT = '<svg class="expense-svg-icon" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M4 3h16a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H9l-5 4v-4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z"/></svg>';
 
   function renderExpensesMobile(cards, draft, draftSummary) {
+    const timelineHtml = renderExpenseTimeline();
     const showDetail = state.ui.expenseMobileView === 'detail' && draft;
     if (!showDetail) {
       return `
         <div class="card">
-          <div class="section-title">
-            <div><h2>Módulo 7 · Gastos</h2></div>
-            <button class="btn btn-primary btn-add-line-icon" data-action="add-expense-card" title="Nueva card" aria-label="Nueva card">${iconSvg('plus')}</button>
-          </div>
+          ${renderPageHead('money', 'Gastos', `${(state.expenses.cards || []).length} gastos fijos`, '<button class="btn btn-primary" data-action="add-expense-card">+ Nuevo gasto</button>')}
           <div class="expense-grid">${cards}</div>
         </div>
+        ${timelineHtml}
       `;
     }
 
@@ -12832,6 +14395,10 @@ Objetivo
                 ${expenseTypeOptions.map((t) => `<option value="${sanitize(t.value)}" ${draft.expenseType === t.value ? 'selected' : ''}>${sanitize(t.value)}</option>`).join('')}
               </select>
             </div>
+          </div>
+          <div class="expense-m-pair">
+            <div><label>Vence el día</label><select data-expense-draft="dueDay">${renderExpenseDueDayOptions(draft.dueDay)}</select></div>
+            <div><label>Primera cuota en</label><select data-expense-draft="firstDueMonth">${renderExpenseMonthOptions(draft.firstDueMonth)}</select></div>
           </div>
         </div>
 
@@ -12930,6 +14497,9 @@ Objetivo
 
     const rows = (draft?.entries || []).map((entry, index) => {
       const isPaid = entry.status === 'pagado';
+      const dueDate = draft.dueDay ? getExpenseEntryDueDate(draft, index) : '';
+      const dueDays = daysUntil(dueDate);
+      const dueTone = isPaid || dueDays === null ? '' : (dueDays < 0 ? 'is-overdue' : (dueDays <= 7 ? 'is-soon' : ''));
       const expenseAttachment = getPrimaryAttachment(entry, legacyExpenseAttachment);
       const hasPdf = Boolean(expenseAttachment);
       const pdfInputId = `expense-pdf-input-${entry.id}`;
@@ -12937,6 +14507,7 @@ Objetivo
         <tr>
           <td>${index + 1}</td>
           <td><input type="text" data-format="clp" data-entry-id="${entry.id}" data-expense-entry-field="amount" value="${formatNumber(Number(entry.amount) || 0)}" /></td>
+          <td class="expense-due-cell ${dueTone}">${dueDate ? `<span class="mono">${sanitize(formatFinanceDate(dueDate))}</span>${!isPaid && dueDays !== null && dueDays <= 15 ? `<small>${formatDueLabel(dueDays)}</small>` : ''}` : '<span class="small">—</span>'}</td>
           <td><input type="date" data-entry-id="${entry.id}" data-expense-entry-field="date" value="${sanitize(entry.date || '')}" /></td>
           <td>
             <button type="button" class="expense-status-toggle ${isPaid ? 'paid' : 'unpaid'}" data-action="toggle-expense-entry-status" data-entry-id="${entry.id}" title="Cambiar estado">
@@ -12982,24 +14553,21 @@ Objetivo
 
     if (isMobileViewport()) return renderExpensesMobile(cards, draft, draftSummary);
 
+    const expenseCardCount = (state.expenses.cards || []).length;
+    const dueList = getExpenseDueList(7);
+    const expensePendingCount = dueList.filter((item) => item.days < 0).length;
+    const expenseSoonCount = dueList.length - expensePendingCount;
+
     return `
       <div class="card">
-        <div class="section-title">
-          <div>
-            <h2>Módulo 7 · Gastos</h2>
-            <p class="subtitle">Control anual de gastos clave con respaldo de comprobantes PDF por fila.</p>
-          </div>
-          <div class="inline-actions save-inline-actions">
-            <button class="btn btn-primary btn-add-line-icon" data-action="add-expense-card" title="Nueva card" aria-label="Nueva card">${iconSvg('plus')}</button>
-            <span class="pill ok">${(state.expenses.cards || []).length} cards</span>
-            ${renderSaveFeedback('expenses')}
-          </div>
-        </div>
+        ${renderPageHead('money', 'Gastos', `${expenseCardCount} gasto${expenseCardCount === 1 ? '' : 's'} fijo${expenseCardCount === 1 ? '' : 's'} · ${expensePendingCount ? `<strong class="is-bad">${expensePendingCount} vencido${expensePendingCount === 1 ? '' : 's'} sin pagar</strong>` : 'al día'}${expenseSoonCount ? ` · ${expenseSoonCount} vence${expenseSoonCount === 1 ? '' : 'n'} esta semana` : ''} · comprobante PDF por fila ${renderSaveFeedback('expenses')}`, `<button class="btn btn-primary" data-action="add-expense-card">+ Nuevo gasto</button>`)}
 
         <div class="expense-grid">
           ${cards}
         </div>
       </div>
+
+      ${renderExpenseTimeline()}
 
       ${draft ? `
         <div class="card">
@@ -13052,6 +14620,17 @@ Objetivo
                 ${expenseTypeOptions.map((t) => `<option value="${sanitize(t.value)}" ${draft.expenseType === t.value ? 'selected' : ''}>${sanitize(t.value)}</option>`).join('')}
               </select>
             </div>
+            <div>
+              <label class="label-with-tip">
+                <span>Vence el día</span>
+                ${renderInfoTip('Día del mes en que vence cada cuota. Con esto la app avisa en Inicio y marca en rojo las cuotas vencidas sin pagar.')}
+              </label>
+              <select data-expense-draft="dueDay">${renderExpenseDueDayOptions(draft.dueDay)}</select>
+            </div>
+            <div>
+              <label>Primera cuota en</label>
+              <select data-expense-draft="firstDueMonth">${renderExpenseMonthOptions(draft.firstDueMonth)}</select>
+            </div>
           </div>
 
           <div class="table-wrap table-compact">
@@ -13060,7 +14639,8 @@ Objetivo
                 <tr>
                   <th>#</th>
                   <th>Monto</th>
-                  <th>Fecha</th>
+                  <th>Vence</th>
+                  <th>Fecha de pago</th>
                   <th>Estado</th>
                   <th>Subir PDF</th>
                   <th>Quitar</th>
@@ -13070,11 +14650,11 @@ Objetivo
                 </tr>
               </thead>
               <tbody>
-                ${rows || '<tr><td colspan="9" class="empty-state">Sin filas configuradas.</td></tr>'}
+                ${rows || '<tr><td colspan="10" class="empty-state">Sin filas configuradas.</td></tr>'}
               </tbody>
               <tfoot>
                 <tr>
-                  <td colspan="2"><strong>Total pagado: ${formatCurrency(draftSummary.totalPaid)}</strong></td>
+                  <td colspan="3"><strong>Total pagado: ${formatCurrency(draftSummary.totalPaid)}</strong></td>
                   <td><strong>${draftSummary.paidCount} de ${draftSummary.totalCount}</strong></td>
                   <td colspan="6"><strong>Promedio: ${formatCurrency(Math.round(draftSummary.average || 0))}</strong></td>
                 </tr>
@@ -13107,6 +14687,8 @@ Objetivo
       cost: Number(pick('cost', 0)) || 0,
       location: pick('location'),
       notes: pick('notes', pick('description', '')),
+      maintenanceEveryDays: Number(pick('maintenanceEveryDays', 0)) || 0,
+      lastMaintenanceDate: pick('lastMaintenanceDate', ''),
       imageDataUrl: pick('imageDataUrl'),
       imageName: pick('imageName'),
       imageMimeType: pick('imageMimeType'),
@@ -13119,43 +14701,36 @@ Objetivo
       .map((opt) => `<option value="${sanitize(opt)}" ${form.status === opt ? 'selected' : ''}>${sanitize(opt)}</option>`)
       .join('');
 
-    const rows = (state.inventory.desiredItems || []).map((item) => {
-      const notes = String(item.notes || item.description || '').trim();
+    const items = state.inventory.desiredItems || [];
+    const cardsHtml = items.map((item) => {
+      const maint = getEquipmentMaintenance(item);
+      const tone = /reparación|baja/i.test(item.status || '') ? 'bad' : (maint && maint.days <= 7 ? 'warn' : 'good');
       return `
-        <tr>
-          <td>
-            <strong>${sanitize(item.name || '')}</strong>
-            ${item.sku ? `<div class="small">SKU: ${sanitize(item.sku)}</div>` : ''}
-            ${notes ? `<div class="small">${sanitize(notes)}</div>` : ''}
-          </td>
-          <td>${sanitize(item.category || '-')}</td>
-          <td>
-            ${sanitize(item.brand || '-')}
-            ${item.model ? `<div class="small">${sanitize(item.model)}</div>` : ''}
-          </td>
-          <td>${sanitize(item.status || '-')}</td>
-          <td>${sanitize(item.purchaseDate || item.entryDate || '-')}</td>
-          <td>${sanitize(item.supplier || '-')}</td>
-          <td>${Number(item.cost || 0) > 0 ? formatCurrency(Number(item.cost || 0)) : '-'}</td>
-          <td>${sanitize(item.location || '-')}</td>
-          <td>
-            <div class="button-group compact-actions">
-              <button class="btn btn-soft btn-icon" data-action="edit-desired-item" data-id="${item.id}" title="Editar" aria-label="Editar">${iconSvg('edit')}</button>
-              <button class="btn btn-soft btn-icon" data-action="delete-desired-item" data-id="${item.id}" title="Eliminar" aria-label="Eliminar">${iconSvg('trash')}</button>
-            </div>
-          </td>
-        </tr>
-      `;
+        <div class="equip-card row-clickable ${idsEqual(item.id, state.ui.editingDesiredId) ? 'is-selected' : ''}" data-action="edit-desired-item" data-id="${item.id}" role="button" tabindex="0">
+          <span class="equip-thumb">${item.imageDataUrl ? `<img src="${sanitize(item.imageDataUrl)}" alt="" />` : '<span aria-hidden="true">▦</span>'}</span>
+          <div class="equip-body">
+            <div class="equip-head"><strong>${sanitize(item.name || '')}</strong><button type="button" class="btn btn-soft btn-icon btn-xs" data-action="delete-desired-item" data-id="${item.id}" title="Eliminar" aria-label="Eliminar">${iconSvg('trash')}</button></div>
+            ${Number(item.cost || 0) > 0 ? `<span class="mono equip-cost">${formatCurrency(item.cost)}</span>` : ''}
+            <div class="small">${sanitize([item.brand, item.model, item.location].filter(Boolean).join(' · ') || item.category || '')}</div>
+            <span class="equip-state tone-${tone}"><i></i>${sanitize(item.status || 'Operativo')}</span>
+            ${maint ? `
+              <div class="equip-maint tone-${maint.days < 0 ? 'bad' : maint.days <= 7 ? 'warn' : 'good'}">
+                <span>${maint.days < 0 ? `Mantención vencida hace ${-maint.days} día${maint.days === -1 ? '' : 's'}` : maint.days === 0 ? 'Mantención hoy' : `Mantención en ${maint.days} día${maint.days === 1 ? '' : 's'}`}</span>
+                <span class="equip-maint-bar"><span style="width:${(maint.used * 100).toFixed(0)}%"></span></span>
+                ${maint.days <= 7 ? `<button type="button" class="btn btn-soft btn-xs" data-action="equipment-maintenance-done" data-id="${item.id}">✓ Mantención hecha</button>` : ''}
+              </div>` : '<div class="small">Sin mantención programada</div>'}
+          </div>
+        </div>`;
     }).join('');
+    const formOpen = Boolean(state.ui.desiredFormOpen || state.ui.editingDesiredId);
 
     return `
-      <div class="card">
+      <div class="db-split has-ficha">
+      ${formOpen ? `<div class="card db-ficha">
         <div class="section-title">
-          <div>
-            <h3>Ingreso de equipo a Inventario</h3>
-          </div>
+          <div><h3>${state.ui.editingDesiredId ? `Editar equipo · ${sanitize(editing.name || '')}` : 'Ficha de equipo nuevo'}</h3></div>
+          <button class="btn btn-soft" data-action="close-desired-form">Cerrar ficha</button>
         </div>
-
         <datalist id="${categoryListId}">
           ${categorySuggestions.map((cat) => `<option value="${sanitize(cat)}"></option>`).join('')}
         </datalist>
@@ -13207,6 +14782,17 @@ Objetivo
               </div>
             </div>
 
+            <div class="database-grid database-grid-2 compact-grid">
+              <div>
+                <label class="label-with-tip"><span>Mantención cada</span>${renderInfoTip('Cada cuántos días le toca mantención. Cuando falten 7 días o menos, aparece en Inicio.')}</label>
+                <select data-desired-draft="maintenanceEveryDays">${[[0, 'Sin mantención programada'], [7, '7 días'], [15, '15 días'], [30, '30 días'], [60, '60 días'], [90, '90 días'], [180, '6 meses'], [365, '1 año']].map(([v, l]) => `<option value="${v}" ${Number(form.maintenanceEveryDays) === v ? 'selected' : ''}>${l}</option>`).join('')}</select>
+              </div>
+              <div>
+                <label>Última mantención</label>
+                <input type="date" data-desired-draft="lastMaintenanceDate" value="${sanitize(form.lastMaintenanceDate || '')}" />
+              </div>
+            </div>
+
             <div class="database-grid compact-grid">
               <div class="field-wide-2">
                 <label>Ubicación en el galpón</label>
@@ -13235,54 +14821,74 @@ Objetivo
           <button class="btn btn-primary" data-action="save-desired-item">Guardar</button>
           <button class="btn btn-soft btn-icon" data-action="clear-desired-form" title="Limpiar ficha" aria-label="Limpiar ficha">${iconSvg('broom')}</button>
         </div>
-      </div>
+      </div>` : renderFichaPlaceholder('Selecciona un equipo para ver y editar su ficha.', 'open-desired-form', '+ Equipo')}
 
       <div class="card">
         <div class="section-title">
-          <h3>Inventario Completo</h3>
-          <span class="pill ok">${(state.inventory.desiredItems || []).length} registros</span>
+          <h3>Equipos del taller</h3>
+          <span class="pill ok">${items.length} equipo${items.length === 1 ? '' : 's'}</span>
         </div>
-        <div class="table-wrap table-compact">
-          <table>
-            <thead>
-              <tr>
-                <th>Equipamiento</th>
-                <th>Categoría</th>
-                <th>Marca / Modelo</th>
-                <th>Estado</th>
-                <th>Fecha de compra</th>
-                <th>Proveedor</th>
-                <th>Coste $</th>
-                <th>Ubicación</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>${rows || '<tr><td colspan="9" class="empty-state">Aún no hay equipos registrados en el inventario.</td></tr>'}</tbody>
-          </table>
-        </div>
+        ${items.length ? `<div class="equip-grid">${cardsHtml}</div>` : '<div class="empty-state">Aún no hay equipos registrados. Agrega el primero con "+ Equipo".</div>'}
+      </div>
       </div>
     `;
   }
 
+  // Encabezado común de cada sección (etapa 2): familia, título, resumen con cifras y acciones.
+  const PAGE_FAMILIES = { home: 'Inicio', prod: 'Producción', money: 'Dinero', shop: 'Taller', settings: 'Ajustes' };
+  function renderPageHead(family, title, subtitle = '', actions = '') {
+    return `
+      <div class="section-title page-head">
+        <div>
+          <span class="page-family nav-group-${family}">${PAGE_FAMILIES[family] || ''}</span>
+          <h2>${title}</h2>
+          ${subtitle ? `<p class="subtitle">${subtitle}</p>` : ''}
+        </div>
+        ${actions ? `<div class="page-actions">${actions}</div>` : ''}
+      </div>
+    `;
+  }
+
+  function renderPageTabs(tabs, activeKey, action, label, dataKey = 'tab') {
+    return `
+      <div class="page-tabs" role="tablist" aria-label="${sanitize(label)}">
+        ${tabs.map(([key, text]) => `<button type="button" role="tab" class="page-tab ${activeKey === key ? 'active' : ''}" aria-selected="${activeKey === key}" data-action="${action}" data-${dataKey}="${key}">${text}</button>`).join('')}
+      </div>
+    `;
+  }
+
+  // Columna derecha vacía (escritorio ancho): la tabla no cambia de ancho al abrir una ficha.
+  function renderFichaPlaceholder(text, action, label) {
+    return `<div class="card db-ficha db-ficha-empty">
+        <span class="db-ficha-empty-icon" aria-hidden="true">▤</span>
+        <p>${text}</p>
+        <button type="button" class="btn btn-soft" data-action="${action}">${label}</button>
+      </div>`;
+  }
+
+  // Con 1280 px o más, lista y ficha van lado a lado (ver .db-split en styles.css).
+  function isSplitFichaLayout() {
+    return window.matchMedia('(min-width: 1280px)').matches;
+  }
+
   function renderDatabaseSectionTabs() {
+    const materials = state.database.materials || [];
     const sections = [
-      { key: 'materials', label: 'Base de datos' },
-      { key: 'productTypes', label: 'Tipos de producto' },
-      { key: 'externalResources', label: 'Proveedores' }
+      ['materials', `Insumos <span class="ot-tab-count">${materials.length}</span>`],
+      ['productTypes', `Tipos de producto <span class="ot-tab-count">${(state.database.productTypes || []).length}</span>`],
+      ['externalResources', `Proveedores <span class="ot-tab-count">${(state.database.externalResources || []).length}</span>`]
     ];
+    const active = sections.some((item) => item[0] === state.ui.databaseSection) ? state.ui.databaseSection : 'materials';
+    const activeCount = materials.filter((item) => item.status !== 'Inactivo').length;
+    const groupCount = new Set(materials.map((item) => item.group).filter(Boolean)).size;
+    const actions = active === 'materials'
+      ? `<button class="btn btn-primary" data-action="open-material-form">+ Nuevo insumo</button>`
+      : '';
 
     return `
       <div class="card">
-        <div class="section-title">
-          <div>
-            <h2>Módulo 3 · Base de datos</h2>
-            <p class="subtitle">Administra tu base principal y sus subbases conectadas al presupuestador.</p>
-          </div>
-          <button class="btn btn-primary" data-action="open-order-merge" title="Sumar OT desde un archivo JSON">+ Sumar OT</button>
-        </div>
-        <div class="filter-row">
-          ${sections.map((section) => `<button class="btn filter-chip ${state.ui.databaseSection === section.key ? 'active' : ''}" data-action="set-database-section" data-section="${section.key}">${section.label}</button>`).join('')}
-        </div>
+        ${renderPageHead('prod', 'Base de datos', `${materials.length} insumos · ${activeCount} activos · ${groupCount} grupos · conectados al presupuestador`, actions)}
+        ${renderPageTabs(sections, active, 'set-database-section', 'Secciones de Base de datos', 'section')}
       </div>
     `;
   }
@@ -13378,6 +14984,8 @@ Objetivo
       facebook: draft.facebook ?? editing.facebook ?? '',
       email: draft.email ?? editing.email ?? '',
       website: draft.website ?? editing.website ?? '',
+      address: draft.address ?? editing.address ?? '',
+      district: draft.district ?? editing.district ?? '',
       status: draft.status ?? editing.status ?? 'Activo'
     };
 
@@ -13392,12 +15000,14 @@ Objetivo
           item.email ? `Mail: ${sanitize(item.email)}` : '',
           item.website ? `Web: ${sanitize(item.website)}` : ''
         ].filter(Boolean).map((line) => `<div class="small">${line}</div>`).join('');
+        const addressText = providerAddressText(item);
 
         return `
         <tr class="${item.status === 'Inactivo' ? 'row-inactive' : ''}">
           <td>${sanitize(providerType)}</td>
           <td><strong>${sanitize(item.name)}</strong></td>
           <td>${sanitize(item.description || '')}</td>
+          <td>${addressText ? sanitize(addressText) : '<span class="small">Sin dirección</span>'}</td>
           <td>${contactLines || '<div class="small">Sin datos de contacto</div>'}</td>
           <td>${sanitize(item.status || 'Activo')}</td>
           <td>
@@ -13458,6 +15068,14 @@ Objetivo
                 <label>Página web</label>
                 <input data-external-resource-draft="website" value="${sanitize(form.website)}" placeholder="https://..." />
               </div>
+              <div class="field-wide-2">
+                <label>Dirección</label>
+                <input data-external-resource-draft="address" value="${sanitize(form.address)}" placeholder="Calle y número, local u oficina" />
+              </div>
+              <div>
+                <label>Comuna</label>
+                <input data-external-resource-draft="district" value="${sanitize(form.district)}" placeholder="Comuna" />
+              </div>
               <div>
                 <label>Estado</label>
                 <select data-external-resource-draft="status">
@@ -13486,12 +15104,13 @@ Objetivo
                 <th>Tipo</th>
                 <th>Nombre</th>
                 <th>Descripción</th>
+                <th>Dirección</th>
                 <th>Contacto</th>
                 <th>Estado</th>
                 <th></th>
               </tr>
             </thead>
-            <tbody>${rows || '<tr><td colspan="6" class="empty-state">Aún no hay proveedores guardados.</td></tr>'}</tbody>
+            <tbody>${rows || '<tr><td colspan="7" class="empty-state">Aún no hay proveedores guardados.</td></tr>'}</tbody>
           </table>
         </div>
       </div>
@@ -13499,6 +15118,10 @@ Objetivo
   }
 
   const PROVIDER_PRIVATE = 'Particular / privado';
+
+  function providerAddressText(item) {
+    return [item.address, item.district].map((v) => String(v || '').trim()).filter(Boolean).join(', ');
+  }
 
   function providerContactText(item) {
     return [item.phone, item.instagram, item.facebook, item.email, item.website].map((v) => String(v || '').trim()).filter(Boolean).join(' · ');
@@ -13724,6 +15347,8 @@ Objetivo
             <div><label>Instagram</label><input data-external-resource-draft="instagram" value="${sanitize(f('instagram'))}" placeholder="@usuario" /></div>
             <div><label>Correo</label><input data-external-resource-draft="email" value="${sanitize(f('email'))}" placeholder="correo@dominio.cl" /></div>
             <div><label>Página web</label><input data-external-resource-draft="website" value="${sanitize(f('website'))}" placeholder="https://..." /></div>
+            <div class="contact-span-2"><label>Dirección</label><input data-external-resource-draft="address" value="${sanitize(f('address'))}" placeholder="Calle y número" /></div>
+            <div><label>Comuna</label><input data-external-resource-draft="district" value="${sanitize(f('district'))}" placeholder="Comuna" /></div>
             <div><label>Estado</label><select data-external-resource-draft="status"><option value="Activo" ${f('status', 'Activo') === 'Activo' ? 'selected' : ''}>Activo</option><option value="Inactivo" ${f('status') === 'Inactivo' ? 'selected' : ''}>Inactivo</option></select></div>
           </div>
           <div class="inline-actions action-pair">
@@ -13745,7 +15370,6 @@ Objetivo
           <button type="button" class="btn mobile-home-btn" data-action="db-open-view" data-view-key="table"><span>Base de datos de insumos</span></button>
           <button type="button" class="btn mobile-home-btn" data-action="db-open-view" data-view-key="productTypes"><span>Tipos de producto</span></button>
           <button type="button" class="btn mobile-home-btn" data-action="db-open-view" data-view-key="providers"><span>Proveedores</span></button>
-          <button type="button" class="btn mobile-home-btn" data-action="open-order-merge"><span>Sumar OT</span></button>
         </div>
       </div>`;
   }
@@ -13815,6 +15439,7 @@ Objetivo
     openPickerModal(item.name, `${detailRows([
       ['Tipo', sanitize(normalizeProviderType(item.type))],
       ['Descripción', sanitize(item.description || '')],
+      ['Dirección', sanitize(providerAddressText(item))],
       ['Contacto', sanitize(providerContactText(item))],
       ['Estado', sanitize(item.status || 'Activo')]
     ])}
@@ -13961,7 +15586,7 @@ Objetivo
         ? `<strong>Dir:</strong> ${sanitize(item.supplierAddress || 'Sin dirección')}<br><strong>Contacto:</strong> ${sanitize(item.supplierContact || 'Sin contacto')}`
         : '<strong>Dir:</strong> Sin dirección<br><strong>Contacto:</strong> Sin contacto';
       return `
-      <tr class="${item.status === 'Inactivo' ? 'row-inactive' : ''}">
+      <tr class="row-clickable ${item.status === 'Inactivo' ? 'row-inactive' : ''} ${idsEqual(item.id, state.ui.editingMaterialId) ? 'is-selected' : ''}" data-action="edit-material" data-id="${item.id}" title="Abrir ficha">
         <td>
           <div class="status-group-cell">
             <span class="group-cell-label">${sanitize(item.group)}</span>
@@ -13997,14 +15622,18 @@ Objetivo
     `;
     }).join('');
 
+    // La ficha se abre con "+ Nuevo insumo", al editar o duplicar; la lista queda siempre a la vista.
+    const formOpen = Boolean(state.ui.databaseFormOpen || state.ui.editingMaterialId || state.ui.databaseDraft);
     return `
       ${sectionTabs}
-      <div class="card">
+      <div class="db-split has-ficha">
+      ${formOpen ? `<div class="card db-ficha">
         <div class="section-title">
           <div>
-            <h2>Base de datos</h2>
-            <p class="subtitle">Crea, ordena y reutiliza tus insumos, servicios y referencias de compra con el mismo criterio visual del resto de la app.</p>
+            <h3>${state.ui.editingMaterialId ? `Editar insumo · ${sanitize(editing.name || '')}` : 'Ficha de insumo nuevo'}</h3>
+            <p class="subtitle">Identificación, costeo base, compra, imagen y notas. El costo por unidad se usa en el presupuestador.</p>
           </div>
+          <button class="btn btn-soft" data-action="cancel-edit-material">Cerrar ficha</button>
         </div>
 
         <div class="database-form-layout">
@@ -14116,11 +15745,11 @@ Objetivo
           <button class="btn btn-soft btn-icon" data-action="clear-material-form" title="Limpiar ficha" aria-label="Limpiar ficha">${iconSvg('broom')}</button>
           ${state.ui.editingMaterialId ? '<button class="btn btn-soft" data-action="cancel-edit-material">Cancelar edición</button>' : ''}
         </div>
-      </div>
+      </div>` : renderFichaPlaceholder('Selecciona un insumo de la tabla para ver y editar su ficha.', 'open-material-form', '+ Nuevo insumo')}
 
       <div class="card">
         <div class="section-title">
-          <h3>Base de datos actual</h3>
+          <h3>Insumos registrados</h3>
           <span class="pill ok">${visibleItems.length} visibles / ${state.database.materials.length} registros</span>
         </div>
         <div class="filter-row">${filterButtons}</div>
@@ -14142,6 +15771,7 @@ Objetivo
           </table>
         </div>
 
+      </div>
       </div>
     `;
   }

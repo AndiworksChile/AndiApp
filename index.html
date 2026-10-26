@@ -6,12 +6,12 @@
   <title>AndiApp · Costeo y gestión interna</title>
   <meta name="description" content="Plataforma interna para proyectar escenarios, costear trabajos y organizar órdenes de trabajo." />
   <script>
-    window.ERM_APP_VERSION = '2.1.0';
+    window.ERM_APP_VERSION = '2.1.2';
   </script>
-  <link rel="manifest" href="manifest.json?v=2.1.0" />
-  <link rel="icon" type="image/svg+xml" href="assets/logo/logoapp.svg?v=2.1.0" />
-  <link rel="icon" type="image/png" sizes="32x32" href="assets/logo/icons/logoapp-32.png?v=2.1.0" />
-  <link rel="apple-touch-icon" sizes="180x180" href="assets/logo/icons/logoapp-180.png?v=2.1.0" />
+  <link rel="manifest" href="manifest.json?v=2.1.2" />
+  <link rel="icon" type="image/svg+xml" href="assets/logo/logoapp.svg?v=2.1.2" />
+  <link rel="icon" type="image/png" sizes="32x32" href="assets/logo/icons/logoapp-32.png?v=2.1.2" />
+  <link rel="apple-touch-icon" sizes="180x180" href="assets/logo/icons/logoapp-180.png?v=2.1.2" />
   <meta name="theme-color" content="#15181D" />
   <meta name="mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -19,8 +19,7 @@
   <meta name="apple-mobile-web-app-title" content="AndiApp" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link rel="stylesheet" href="assets/css/styles.css?v=2.1.0" />
-  <script type="module" src="https://ajax.googleapis.com/ajax/libs/model-viewer/3.4.0/model-viewer.min.js"></script>
+  <link rel="stylesheet" href="assets/css/styles.css?v=2.1.2" />
 </head>
 <body>
   <div id="session-panel" class="session-panel is-hidden" aria-hidden="true">
@@ -35,20 +34,25 @@
   </div>
 
   <div id="activity-log-widget" class="activity-log-widget">
-    <button type="button" class="activity-log-toggle" data-action="toggle-activity-log" title="Ver registro de actividad" aria-label="Ver registro de actividad" aria-expanded="false">
-      <span class="activity-log-icon" aria-hidden="true">☰</span>
-      <span id="activity-log-latest" class="activity-log-latest">Sin actividad reciente</span>
-    </button>
     <div id="activity-log-list" class="activity-log-list is-hidden"></div>
+    <div class="activity-log-bar">
+      <button type="button" class="activity-log-toggle" data-action="toggle-activity-log" title="Ver historial de acciones" aria-label="Ver historial de acciones" aria-expanded="false">
+        <span class="activity-log-icon" aria-hidden="true">☰</span>
+        <span id="activity-log-latest" class="activity-log-latest">Sin actividad reciente</span>
+      </button>
+      <button type="button" id="activity-undo-btn" class="activity-undo-btn" data-action="undo-last-action" title="Nada que deshacer" aria-label="Deshacer la última acción" disabled><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M5.5 3 2 6.5 5.5 10M2.5 6.5H10a4 4 0 0 1 0 8H7" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>Deshacer</button>
+    </div>
   </div>
 
   <aside class="app-sidebar" aria-label="Menú principal">
     <div class="sidebar-brand">
-      <img src="assets/logo/andiworks-cara-negativa.svg?v=2.1.0" alt="" width="30" height="32" />
+      <img src="assets/logo/andiworks-cara-negativa.svg?v=2.1.2" alt="" width="30" height="32" />
       <span class="sidebar-brand-text"><strong>AndiApp</strong><small>by AndiWorks<b>.cl</b></small></span>
     </div>
     <button type="button" class="btn-new" data-action="toggle-new-menu" aria-expanded="false" aria-controls="new-menu">+ Nuevo</button>
+    <div class="sidebar-scroll">
     <nav class="nav-tabs" aria-label="Secciones">
+      <button class="tab nav-home" data-view="home">Inicio · Hoy</button>
       <div class="nav-group nav-group-prod">
         <span class="nav-group-title">Producción</span>
         <button class="tab" data-view="quote">Presupuestador</button>
@@ -69,10 +73,13 @@
       <div class="nav-group nav-group-settings">
         <span class="nav-group-title">Ajustes</span>
         <button class="tab active" data-view="scenario">Escenario</button>
+        <button class="tab" data-view="links">Enlaces</button>
         <button class="tab" data-view="backup">Respaldo</button>
         <button class="tab" data-view="docs">Ayuda técnica</button>
       </div>
     </nav>
+    <div id="sidebar-links" class="sidebar-links"></div>
+    </div>
   </aside>
 
   <div id="new-menu" class="new-menu is-hidden" role="menu" aria-label="Crear">
@@ -82,12 +89,13 @@
     <button type="button" class="new-menu-item nav-group-money" role="menuitem" data-view="finance"><span class="new-menu-dot"></span><span><strong>Movimiento de caja</strong><small>Finanzas</small></span></button>
     <button type="button" class="new-menu-item nav-group-money" role="menuitem" data-view="expenses"><span class="new-menu-dot"></span><span><strong>Gasto fijo</strong><small>Gastos</small></span></button>
     <button type="button" class="new-menu-item nav-group-shop" role="menuitem" data-view="attendance"><span class="new-menu-dot"></span><span><strong>Marcar asistencia</strong><small>Asistencia</small></span></button>
-    <button type="button" class="new-menu-item nav-group-prod" role="menuitem" data-view="database"><span class="new-menu-dot"></span><span><strong>Insumo</strong><small>Base de datos</small></span></button>
+    <button type="button" class="new-menu-item nav-group-prod" role="menuitem" data-action="open-material-form"><span class="new-menu-dot"></span><span><strong>Insumo</strong><small>Base de datos</small></span></button>
+    <button type="button" class="new-menu-item nav-group-prod" role="menuitem" data-action="open-contact-form"><span class="new-menu-dot"></span><span><strong>Cliente</strong><small>Clientes</small></span></button>
   </div>
 
   <div class="app-shell">
     <header class="mobile-topbar">
-      <img src="assets/logo/andiworks-cara-negativa.svg?v=2.1.0" alt="" width="24" height="26" />
+      <img src="assets/logo/andiworks-cara-negativa.svg?v=2.1.2" alt="" width="24" height="26" />
       <span id="mobile-section-title" class="mobile-section-title">AndiApp</span>
     </header>
 
@@ -262,15 +270,15 @@
       new MutationObserver(updateDock).observe(document.body, { childList: true });
     })();
   </script>
-  <script src="assets/js/data.js?v=2.1.0"></script>
-  <script src="assets/js/storage.js?v=2.1.0"></script>
-  <script src="assets/js/calculations.js?v=2.1.0"></script>
+  <script src="assets/js/data.js?v=2.1.2"></script>
+  <script src="assets/js/storage.js?v=2.1.2"></script>
+  <script src="assets/js/calculations.js?v=2.1.2"></script>
   <script src="assets/js/vendor/jszip.min.js"></script>
   <script src="assets/js/vendor/jspdf.umd.min.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js"></script>
   <script src="assets/js/firebase-config.js"></script>
-  <script src="assets/js/sync.js?v=2.1.0"></script>
+  <script src="assets/js/sync.js?v=2.1.2"></script>
 </body>
 </html>

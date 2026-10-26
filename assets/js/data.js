@@ -71,6 +71,12 @@ window.ERMDefaults = (() => {
       orderSortByNumber: false,
       orderGroupPriority: '',
       orderTabs: [],
+      orderPreviewTab: 'resumen',
+      databaseFormOpen: false,
+      contactFormOpen: false,
+      desiredFormOpen: false,
+      inventoryTab: 'equip',
+      financeTab: 'mov',
       activityLog: [],
       scenarioLocked: false,
       lastScenarioSavedAt: null,
@@ -141,6 +147,14 @@ window.ERMDefaults = (() => {
         avgHoursPerOrder: 6,
         targetMonthlyProfit: 500000
       },
+      annualSalesGoal: 0,
+      // Enlaces (Ajustes): páginas de uso frecuente; las marcadas con pinned aparecen en la barra lateral.
+      links: [
+        { id: uid('lnk'), group: 'AndiWorks', name: 'andiworks.cl', url: 'https://www.andiworks.cl', pinned: true },
+        { id: uid('lnk'), group: 'AndiWorks', name: 'GitHub · AndiworksChile', url: 'https://github.com/AndiworksChile', pinned: true },
+        { id: uid('lnk'), group: 'Banco y SII', name: 'SII', url: 'https://www.sii.cl', pinned: false },
+        { id: uid('lnk'), group: 'Banco y SII', name: 'Banco de Chile', url: 'https://www.bancochile.cl', pinned: false }
+      ],
       personalGoals: []
     },
     quote: {
@@ -200,14 +214,18 @@ window.ERMDefaults = (() => {
       externalResources: []
     },
     inventory: {
-      desiredItems: []
+      desiredItems: [],
+      // Lista "Quiero comprar": { id, name, priority, why, offers: [{ id, store, url, price }] }
+      wishItems: []
     },
     expenses: {
       cards: defaultExpenseCards()
     },
     attendance: {
       activeSession: null,
-      records: []
+      records: [],
+      machineTimers: [],
+      machineRecords: []
     },
     finance: {
       initialBalance: 0,

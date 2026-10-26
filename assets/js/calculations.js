@@ -422,10 +422,13 @@ window.ERMCalc = (() => {
     const selectedStatus = priceTargetStatus(effectiveNet, minimumNet, idealNet);
     const averageSaleSignal = averageOrderSignal(effectiveNet, projection);
 
+    // Tolerancia: al elegir el precio mínimo o ideal, el redondeo a pesos deja el margen en
+    // 0,34999999… y no debe leerse como "bajo el mínimo".
+    const MARGIN_EPS = 1e-6;
     let marginStatus = 'bajo';
-    if (realMargin >= asNumber(scenario.idealMargin)) {
+    if (realMargin + MARGIN_EPS >= asNumber(scenario.idealMargin)) {
       marginStatus = 'ideal';
-    } else if (realMargin >= asNumber(scenario.minimumMargin)) {
+    } else if (realMargin + MARGIN_EPS >= asNumber(scenario.minimumMargin)) {
       marginStatus = 'minimo';
     }
 
@@ -487,6 +490,21 @@ window.ERMCalc = (() => {
     };
   }
 
+  // Meta anual de ventas netas (sin IVA). La mínima sale del margen mínimo del escenario y la meta
+  // de la venta recomendada (cubre la utilidad objetivo), ambas llevadas de su período a 12 meses.
+  // Si el usuario fija una meta a mano (scenario.annualSalesGoal > 0), esa reemplaza a la recomendada.
+  function annualSalesGoal(scenario) {
+    const projection = projectionSummary(scenario);
+    const toYear = 12 / projection.periodMonths;
+    const manual = asNumber(scenario.annualSalesGoal);
+    return {
+      minimum: roundMoney(projection.minimumSalesRequired * toYear),
+      recommended: roundMoney(projection.recommendedSalesGoal * toYear),
+      target: manual > 0 ? roundMoney(manual) : roundMoney(projection.recommendedSalesGoal * toYear),
+      isManual: manual > 0
+    };
+  }
+
   return {
     asNumber,
     roundMoney,
@@ -502,6 +520,7 @@ window.ERMCalc = (() => {
     learningCurveFactor,
     targetPrice,
     projectionSummary,
+    annualSalesGoal,
     calculateQuote
   };
 })();

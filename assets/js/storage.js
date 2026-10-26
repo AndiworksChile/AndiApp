@@ -130,6 +130,19 @@ window.ERMStorage = (() => {
         { name: 'Limpieza y orden', periodicity: 'mensual', amount: 15000 }
       ];
 
+      // Meta anual de ventas netas fijada a mano (0 = se calcula desde el escenario).
+      state.scenario.annualSalesGoal = Math.max(0, Number(state.scenario.annualSalesGoal) || 0);
+      // Enlaces: solo http(s); si nunca se guardaron, quedan los de ejemplo.
+      state.scenario.links = (Array.isArray(parsed.scenario?.links) ? parsed.scenario.links : deepClone(window.ERMDefaults.scenario.links))
+        .filter((item) => item && /^https?:\/\//i.test(String(item.url || '')) && String(item.name || '').trim())
+        .map((item) => ({
+          id: item.id || `lnk-${Math.random().toString(36).slice(2, 8)}`,
+          group: String(item.group || 'General').trim() || 'General',
+          name: String(item.name).trim(),
+          url: String(item.url).trim(),
+          pinned: Boolean(item.pinned)
+        }));
+
       requiredFixedCosts.forEach((required) => {
         const exists = (state.scenario.fixedCosts || []).some((item) => item.name === required.name);
         if (!exists) {
@@ -258,6 +271,9 @@ window.ERMStorage = (() => {
           baseYear: String(card.baseYear || new Date().getFullYear()),
           period,
           expenseType: String(card.expenseType || ''),
+          // Vencimiento: día del mes (0 = sin día fijo) y mes de la primera cuota.
+          dueDay: Math.min(31, Math.max(0, Math.round(Number(card.dueDay) || 0))),
+          firstDueMonth: Math.min(12, Math.max(1, Math.round(Number(card.firstDueMonth) || 1))),
           entries: normalizedEntries
         };
       });
@@ -289,12 +305,16 @@ window.ERMStorage = (() => {
         comments: item.comments || ''
       })).filter((item) => item.name);
 
+      // Se conservan todos los campos (teléfono, redes, correo, web); antes se perdían al recargar.
       state.database.externalResources = (state.database.externalResources || []).map((item) => ({
+        ...item,
         id: item.id || `ext-${Math.random().toString(36).slice(2, 8)}`,
         type: item.type || 'ayuda',
         name: String(item.name || '').trim(),
         hourlyRate: Number(item.hourlyRate || 0) || 0,
         description: item.description || '',
+        address: String(item.address || ''),
+        district: String(item.district || ''),
         status: item.status || 'Activo',
         createdAt: item.createdAt || new Date().toLocaleDateString('es-CL')
       })).filter((item) => item.name);
@@ -322,6 +342,8 @@ window.ERMStorage = (() => {
         imageMimeType: item.imageMimeType || '',
         imageSizeKb: Number(item.imageSizeKb || 0) || 0,
         expanded: Boolean(item.expanded),
+        maintenanceEveryDays: Math.max(0, Number(item.maintenanceEveryDays) || 0),
+        lastMaintenanceDate: String(item.lastMaintenanceDate || ''),
         offers: Array.isArray(item.offers) ? item.offers.map((offer) => ({
           id: offer.id || `off-${Math.random().toString(36).slice(2, 8)}`,
           price: Number(offer.price || 0) || 0,
@@ -330,6 +352,22 @@ window.ERMStorage = (() => {
         })) : []
         };
       }).filter((item) => item.name);
+
+      state.inventory.wishItems = (Array.isArray(state.inventory.wishItems) ? state.inventory.wishItems : [])
+        .filter((item) => item && String(item.name || '').trim())
+        .map((item) => ({
+          id: item.id || `wish-${Math.random().toString(36).slice(2, 8)}`,
+          name: String(item.name).trim(),
+          priority: ['alta', 'media', 'baja'].includes(item.priority) ? item.priority : 'media',
+          why: String(item.why || ''),
+          createdAt: item.createdAt || new Date().toISOString().slice(0, 10),
+          offers: (Array.isArray(item.offers) ? item.offers : []).map((offer) => ({
+            id: offer.id || `woff-${Math.random().toString(36).slice(2, 8)}`,
+            store: String(offer.store || ''),
+            url: /^https?:\/\//i.test(String(offer.url || '')) ? String(offer.url) : '',
+            price: Math.max(0, Number(offer.price) || 0)
+          }))
+        }));
 
       if (state.quote.logistics?.deliveryHourRate === 12000) {
         state.quote.logistics.deliveryHourRate = 0;

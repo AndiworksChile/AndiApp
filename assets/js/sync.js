@@ -54,15 +54,34 @@
   // ---------- estilos y UI ----------
   const style = document.createElement('style');
   style.textContent = `
-    .sync-login{position:fixed;inset:0;z-index:5000;display:flex;align-items:center;justify-content:center;background:var(--bg,#f4f5f7);padding:16px}
-    .sync-login-stack{width:min(360px,100%);display:flex;flex-direction:column;align-items:center;gap:12px}
-    .sync-login-stack model-viewer{width:220px;height:220px;display:block}
-    .sync-login form{width:100%;background:var(--panel,#fff);border:var(--border,1px solid #d5d8de);border-radius:6px;padding:22px;display:flex;flex-direction:column;gap:10px;color:var(--ink,#1c1f26);font-family:inherit}
-    .sync-login h2{margin:0 0 4px;font-size:20px}
-    .sync-login input{padding:9px 10px;border:var(--border,1px solid #d5d8de);border-radius:4px;font:inherit;background:var(--panel-soft,#fff);color:inherit}
-    .sync-login button{padding:10px;border:0;border-radius:4px;background:var(--brand,#2563eb);color:#fff;font:inherit;cursor:pointer}
+    /* Pantalla de entrada con la marca AndiWorks: fondo tinta, ficha blanca y el logo "cortado" por un láser. */
+    .sync-login{position:fixed;inset:0;z-index:5000;display:flex;align-items:center;justify-content:center;background:#15181D;padding:32px 16px;overflow-y:auto;font-family:'Barlow',system-ui,sans-serif}
+    .sync-login.loading{flex-direction:column;gap:18px;color:#EEF0EE;font:500 13px 'IBM Plex Mono',monospace;letter-spacing:.08em;text-transform:uppercase}
+    .sync-login-stack{width:min(420px,100%);display:flex;flex-direction:column;align-items:center;gap:22px}
+    .sync-logo{position:relative;width:132px;height:132px}
+    .sync-logo img{width:100%;height:100%;display:block;animation:sync-cut 1.6s cubic-bezier(.6,.05,.35,1) both}
+    .sync-logo::after{content:"";position:absolute;left:-14%;right:-14%;top:0;height:2px;border-radius:2px;background:#F26A1B;box-shadow:0 0 12px 2px rgba(242,106,27,.75);opacity:0;animation:sync-laser 1.6s cubic-bezier(.6,.05,.35,1) both}
+    .sync-logo::before{content:"";position:absolute;inset:-10px;border-radius:50%;border:1px solid #F26A1B;opacity:0;animation:sync-ring 1s ease-out 1.5s both}
+    .sync-login.loading .sync-logo img{animation:none}
+    .sync-login.loading .sync-logo::after{animation:sync-scan 1.4s ease-in-out infinite alternate}
+    .sync-login.loading .sync-logo::before{animation:none}
+    @keyframes sync-cut{from{clip-path:inset(0 0 100% 0)}to{clip-path:inset(0 0 0 0)}}
+    @keyframes sync-laser{0%{top:0;opacity:1}92%{top:100%;opacity:1}100%{top:100%;opacity:0}}
+    @keyframes sync-scan{from{top:8%;opacity:.9}to{top:92%;opacity:.9}}
+    @keyframes sync-ring{0%{opacity:0;transform:scale(.92)}15%{opacity:.9}100%{opacity:0;transform:scale(1.14)}}
+    @media (prefers-reduced-motion:reduce){.sync-logo img,.sync-logo::after,.sync-logo::before,.sync-login.loading .sync-logo::after{animation:none}}
+    .sync-login form{width:100%;box-sizing:border-box;background:#fff;border-radius:6px;padding:32px 28px;display:flex;flex-direction:column;gap:14px;color:#15181D}
+    .sync-login-title{display:flex;flex-direction:column;gap:4px;border-top:2px solid #15181D;padding-top:14px}
+    .sync-login h2{margin:0;font:800 36px/1 'Barlow Condensed',sans-serif;text-transform:uppercase;letter-spacing:0}
+    .sync-login-title span{color:#596069;font-size:15px}
+    .sync-login label{font-size:14px;font-weight:600;display:flex;flex-direction:column;gap:6px}
+    .sync-login input{height:46px;box-sizing:border-box;padding:0 12px;border:1px solid #9AA1A9;border-radius:4px;font:16px 'Barlow',sans-serif;background:#fff;color:#15181D}
+    .sync-login input:focus-visible,.sync-login button:focus-visible{outline:2px solid #F26A1B;outline-offset:2px}
+    .sync-login button{min-height:50px;border:0;border-radius:4px;background:#15181D;color:#fff;font:700 16px 'Barlow',sans-serif;cursor:pointer}
     .sync-login button:disabled{opacity:.6;cursor:wait}
-    .sync-login .sync-error{color:#c62828;font-size:13px;min-height:16px}
+    .sync-login .sync-error{color:#b3261e;font-size:14px;font-weight:600;min-height:18px}
+    .sync-login-foot{border-top:1px solid #E2E5E3;padding-top:12px;font-size:13px;color:#596069}
+    .sync-login-foot b{color:#F26A1B;font-weight:inherit}
     .sync-badge{position:fixed;left:10px;bottom:10px;z-index:4000;display:flex;gap:8px;align-items:center;padding:4px 10px;font-size:12px;border-radius:14px;background:var(--panel,#fff);border:var(--border,1px solid #d5d8de);color:var(--ink,#1c1f26);transition:bottom .15s ease}
     .sync-badge button{border:0;background:none;color:var(--brand,#2563eb);cursor:pointer;font:inherit;padding:0}
     .sync-banner{position:fixed;top:0;left:0;right:0;z-index:5000;padding:8px 14px;text-align:center;font-size:13px;background:#fff3cd;color:#5c4400}
@@ -118,13 +137,17 @@
       overlay.className = 'sync-login';
       overlay.innerHTML = `
         <div class="sync-login-stack">
-          <model-viewer src="assets/logotesta.glb" alt="Logo AndiWorks 3D" auto-rotate rotation-per-second="90deg" camera-orbit="0deg 90deg 105%" field-of-view="1deg" min-field-of-view="1deg" max-field-of-view="1deg" disable-zoom disable-pan interaction-prompt="none" loading="eager" shadow-intensity="0"></model-viewer>
+          <div class="sync-logo"><img src="assets/logo/logoapp.svg" alt="AndiWorks" /></div>
           <form>
-            <h2>AndiApp</h2>
-            <input type="email" name="email" placeholder="Correo" autocomplete="username" required />
-            <input type="password" name="password" placeholder="Contraseña" autocomplete="current-password" required />
+            <div class="sync-login-title">
+              <h2>Entrar a AndiApp</h2>
+              <span>Tus datos se sincronizan entre el computador y el teléfono.</span>
+            </div>
+            <label>Correo<input type="email" name="email" placeholder="tu correo" autocomplete="username" required /></label>
+            <label>Contraseña<input type="password" name="password" autocomplete="current-password" required /></label>
             <div class="sync-error" role="alert"></div>
-            <button type="submit">Entrar</button>
+            <button type="submit">Ingresar</button>
+            <div class="sync-login-foot">AndiApp by AndiWorks<b>.cl</b> · versión ${window.ERM_APP_VERSION || ''}</div>
           </form>
         </div>`;
       document.body.appendChild(overlay);
@@ -152,9 +175,10 @@
     if (!el) {
       el = document.createElement('div');
       el.className = 'sync-login loading';
+      el.innerHTML = '<div class="sync-logo"><img src="assets/logo/logoapp.svg" alt="" /></div><span></span>';
       document.body.appendChild(el);
     }
-    el.textContent = text;
+    el.querySelector('span').textContent = text;
     return () => el.remove();
   }
 
