@@ -38,6 +38,122 @@ window.ERMStorage = (() => {
     return quote;
   }
 
+  // ---- Base de costo neta (Política de precios v1, 19-11-2026) ----
+  // Desde ahora baseCost es siempre el NETO y purchaseDoc dice cómo se compra (boleta / factura / exento).
+  // Los insumos de antes no traen purchaseDoc y su baseCost puede ser con IVA o ya neto (se corrigieron a
+  // mano en distintas fechas). Por eso NO se convierten solos: quedan "por revisar" con su costo de siempre
+  // (ERMCalc.materialCosts usa su unitCost tal cual) hasta que en Base de datos se elige, uno por uno, si el
+  // valor guardado es con IVA o neto (convertLegacyMaterial). Solo se aplican solas las correcciones seguras.
+  const NET_BASIS_BACKUP_KEY = 'erm-proyecta-respaldo-materiales-pre-neto';
+  // Correcciones pedidas (19-11-2026), por id de la base de Andiworks.
+  const NET_BASIS_FIXES = {
+    // Láser como servicio solicitado: el costo interno es $150/min y $350/min es el precio de lista.
+    'mat-ttkjrl7': { baseCost: 150, listPrice: 350 },
+    'mat-wdfb8s3': { baseCost: 150, listPrice: 350 }
+  };
+  // Valores que se sabe que ya están en neto (propuesta por defecto en la revisión).
+  const NET_BASIS_KNOWN_NET = ['mat-qkw70fz'];
+  const NET_BASIS_RENAME = { 'mat-qkw70fz': 'Acrílico Color 3mm' };
+  // Acrílico Color 3mm antiguo ($47.124): se elimina si ninguna OT lo usa.
+  const NET_BASIS_REMOVE = ['mat-pzu4u2z'];
+
+  function parseClp(text) {
+    const clean = String(text || '').replace(/\$/g, '').replace(/\./g, '').replace(',', '.').trim();
+    const value = Number(clean);
+    return Number.isFinite(value) ? value : 0;
+  }
+
+  // Quita de las notas las líneas sobre IVA ("Precio con IVA incluido", "sin IVA = $…"):
+  // eso ahora vive en los campos de precio neto, precio con IVA y forma de compra.
+  function cleanIvaNotes(notes) {
+    return String(notes || '')
+      .split(/\r?\n/)
+      .filter((lineText) => !/\b(con|sin)\s+iva\b/i.test(lineText))
+      .join('\n')
+      .trim();
+  }
+
+  function isPendingNetReview(item) {
+    return Boolean(item) && !item.purchaseDoc;
+  }
+
+  // Propuesta para la revisión: neto escrito en la nota ("sin IVA = $7.964") o si el valor ya es neto.
+  function suggestLegacyNet(item) {
+    const noteNet = parseClp((String(item?.notes || '').match(/sin\s+iva\s*=?\s*\$+\s*([\d.,]+)/i) || [])[1]);
+    return {
+      noteNet: noteNet > 0 ? Math.round(noteNet) : 0,
+      valueIs: NET_BASIS_KNOWN_NET.includes(item?.id) ? 'neto' : 'conIva'
+    };
+  }
+
+  // Pasa un insumo antiguo a la base neta. valueIs: 'conIva' (el valor guardado es lo pagado con IVA) o
+  // 'neto' (ya es sin IVA). purchaseDoc: cómo se compra. netOverride: neto escrito a mano (opcional).
+  function convertLegacyMaterial(item, valueIs, purchaseDoc, ivaRate, netOverride) {
+    const iva = 1 + Math.max(0, Number(ivaRate) || 0);
+    const stored = Number(item.baseCost) || 0;
+    const isService = item.calculationUnit === 'min';
+    const manualNet = Number(netOverride) || 0;
+    const baseCost = manualNet > 0 ? Math.round(manualNet) : (isService || valueIs === 'neto' ? stored : Math.round(stored / iva));
+    const converted = {
+      ...item,
+      baseCost,
+      purchaseDoc: isService ? 'exento' : (['boleta', 'factura', 'exento'].includes(purchaseDoc) ? purchaseDoc : 'boleta'),
+      listPrice: Number(item.listPrice) || 0,
+      notes: cleanIvaNotes(item.notes),
+      netReviewedAt: new Date().toISOString()
+    };
+    if (window.ERMCalc?.materialCosts) {
+      const costs = window.ERMCalc.materialCosts(converted, iva - 1);
+      converted.unitCostNet = costs.unitCostNet;
+      converted.unitCost = costs.unitCost;
+    }
+    return converted;
+  }
+
+  function refreshCostBasis(database) {
+    const materials = database.materials || [];
+    database.costBasis = materials.some(isPendingNetReview) ? 'pendiente' : 'neto';
+    return database.costBasis;
+  }
+
+  function migrateMaterialsToNetBasis(state) {
+    const database = state.database || {};
+    if (database.costBasis === 'neto') return;
+    const ivaRate = Number(state.scenario?.ivaRate ?? 0.19);
+    const materials = database.materials || [];
+
+    if (materials.length) {
+      try {
+        if (!localStorage.getItem(NET_BASIS_BACKUP_KEY)) {
+          const slim = materials.map(({ imageDataUrl, ...rest }) => rest);
+          localStorage.setItem(NET_BASIS_BACKUP_KEY, JSON.stringify({ savedAt: new Date().toISOString(), materials: slim }));
+        }
+      } catch (error) {
+        console.warn('No se pudo guardar el respaldo de materiales antes de pasar a neto.', error);
+      }
+    }
+
+    const usedIds = new Set();
+    (state.orders || []).forEach((order) => (order?.quote?.materials || []).forEach((line) => usedIds.add(line.materialId)));
+    (state.quote?.materials || []).forEach((line) => usedIds.add(line.materialId));
+
+    database.materials = materials
+      .filter((item) => !(NET_BASIS_REMOVE.includes(item.id) && !usedIds.has(item.id)))
+      .map((item) => {
+        if (!isPendingNetReview(item)) return item;
+        const renamed = NET_BASIS_RENAME[item.id] ? { ...item, name: NET_BASIS_RENAME[item.id] } : item;
+        // Servicios por minuto (láser propio, servicios): no llevan IVA, se convierten sin preguntar.
+        if (renamed.calculationUnit !== 'min') return renamed;
+        const fix = NET_BASIS_FIXES[renamed.id] || {};
+        const converted = convertLegacyMaterial({ ...renamed, ...(fix.baseCost !== undefined ? { baseCost: fix.baseCost } : {}) }, 'neto', 'exento', ivaRate);
+        if (fix.listPrice !== undefined) converted.listPrice = fix.listPrice;
+        return converted;
+      });
+
+    refreshCostBasis(database);
+    state.database = database;
+  }
+
   function load() {
     try {
       const raw = readRaw();
@@ -181,6 +297,8 @@ window.ERMStorage = (() => {
         imageMimeType: item.imageMimeType || '',
         imageSizeKb: Number(item.imageSizeKb || 0) || 0
       }));
+
+      migrateMaterialsToNetBasis(state);
 
       if (state.ui.databaseFilter === 'Material') {
         state.ui.databaseFilter = 'Placas';
@@ -459,5 +577,8 @@ window.ERMStorage = (() => {
     backend = nextBackend;
   }
 
-  return { load, save, reset, setBackend, normalizeQuotePriceMode };
+  return {
+    load, save, reset, setBackend, normalizeQuotePriceMode,
+    migrateMaterialsToNetBasis, isPendingNetReview, suggestLegacyNet, convertLegacyMaterial, refreshCostBasis
+  };
 })();

@@ -1169,40 +1169,6 @@ td {
 .achievement-pill.warn { background: transparent; color: var(--warn); border-color: var(--warn); }
 
 /* ─── OT CARDS ─── */
-.ot-layout {
-  display: grid; grid-template-columns: minmax(300px, 400px) minmax(0, 1fr);
-  grid-template-rows: minmax(0, 1fr);
-  gap: 16px; align-items: stretch; margin-top: 12px;
-}
-.ot-list-panel { display: flex; flex-direction: column; min-width: 0; min-height: 0; border: 1px solid var(--line); background: var(--panel); }
-.ot-list-controls {
-  display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px;
-  padding: 10px; border-bottom: 1px solid var(--line); flex-shrink: 0;
-}
-.ot-list-controls .btn { min-width: 0; }
-.ot-group-row {
-  display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px;
-  padding: 10px 10px 8px; border-bottom: 1px solid var(--line); flex-shrink: 0;
-}
-.ot-group-btn {
-  --group-color: var(--line-strong);
-  display: flex; flex-direction: column; align-items: center; gap: 4px;
-  padding: 4px 2px; border: 0; background: transparent; color: var(--ink); cursor: pointer; min-width: 0;
-}
-.ot-group-btn.is-pending   { --group-color: #d97a1e; }
-.ot-group-btn.is-delivered { --group-color: #1f8a44; }
-.ot-group-btn.is-prototype { --group-color: var(--ink); }
-.ot-group-circle {
-  width: 40px; height: 40px; border-radius: 50% !important;
-  display: grid; place-items: center;
-  border: 2px solid var(--group-color); color: var(--group-color);
-  font-weight: 700; font-size: 15px; transition: background .15s, color .15s, box-shadow .15s;
-}
-.ot-group-label { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; text-align: center; line-height: 1.2; }
-.ot-group-btn:hover .ot-group-circle { box-shadow: 0 0 0 3px color-mix(in srgb, var(--group-color) 20%, transparent); }
-.ot-group-btn.active .ot-group-circle { background: var(--group-color); color: var(--panel); }
-.ot-group-btn.active .ot-group-label { font-weight: 700; }
-.ot-grid { display: flex; flex-direction: column; gap: 6px; min-width: 0; min-height: 0; padding: 10px; overflow-y: auto; }
 .ot-card {
   width: 100%; padding: 9px 12px;
   border: 1px solid var(--line); border-left: 3px solid var(--line-strong);
@@ -2299,30 +2265,11 @@ body.footer-in-view .sync-badge {
   .fin-mov-form { position: static; max-height: none; order: -1; }
 }
 
-@media (max-width: 1100px) {
-  .ot-layout { grid-template-columns: minmax(260px, 340px) minmax(0, 1fr); }
-  .ot-preview-facts-3 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .ot-preview-columns { grid-template-columns: 1fr; }
-  .ot-preview-col + .ot-preview-col { margin-top: 10px; }
-  .ot-list-controls { grid-template-columns: 1fr; }
-}
 
 /* Móvil: una columna; tarjetas compactas con N° + título + precio con estrellas */
 @media (max-width: 780px) {
-  .ot-layout { grid-template-columns: 1fr; grid-template-rows: none; }
-  .ot-list-panel, .ot-preview { border: 0; background: transparent; }
-  .ot-list-controls { padding: 0 0 10px; border-bottom: 0; }
-  .ot-group-row { padding: 0 0 10px; border-bottom: 0; }
   .ot-preview-photo { width: 76px; height: 76px; }
-  .ot-card-thumb { width: 40px; height: 40px; }
-  .ot-grid { padding: 0; overflow: visible; }
-  .ot-preview { border: 1px solid var(--line); background: var(--panel); }
-  .ot-preview-body { overflow: visible; padding: 12px; }
   .ot-preview-actions-bar { padding: 12px; }
-  .ot-card { padding: 8px 10px; }
-  .ot-card .ot-card-tags { display: none; }
-  .ot-card-title { font-size: 12.5px; }
-  .ot-card-price { font-size: 14px; }
   .ot-card-achievement .achievement-star { --star-size: 14px; }
   .ot-preview-facts-3 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .ot-preview-actions-bar .btn { flex: 1 1 auto; }
@@ -2796,3 +2743,267 @@ label, .label-with-tip {
 }
 .quote-line-dims > div > label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 @media (max-width: 780px) { .quote-line-dims > div > label { font-size: 12px; } }
+
+/* ─── Política de precios v1: avisos de regla y comparación en OT antiguas ─── */
+.quote-rule-notice {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;
+  margin: 10px 0; padding: 8px 12px; border: var(--border); border-left: 3px solid var(--fam-money);
+  border-radius: var(--radius); background: var(--panel-soft); font-size: 14px;
+}
+.quote-rule-notice.is-legacy { border-left-color: var(--line-strong); }
+.purchase-doc-select { margin-top: 4px; max-width: 140px; }
+.purchase-doc-frozen { color: var(--muted); font-style: italic; }
+.rule-tip {
+  position: relative; display: inline-flex; width: 15px; height: 15px; vertical-align: -2px; margin-left: 4px;
+  border: 1px solid var(--accent); color: var(--accent); cursor: help;
+}
+.rule-tip-panel {
+  display: none; position: absolute; left: 0; top: calc(100% + 6px); z-index: 30;
+  width: 300px; max-width: calc(100vw - 32px); padding: 10px 12px; border-radius: var(--radius);
+  background: var(--ink); color: var(--panel); border: 1px solid var(--ink);
+  flex-direction: column; gap: 6px; font: 400 13px/1.4 var(--f-body); text-transform: none; letter-spacing: 0; text-align: left;
+}
+.rule-tip:hover .rule-tip-panel, .rule-tip:focus-within .rule-tip-panel { display: flex; }
+.rule-tip-panel table { width: 100%; border-collapse: collapse; }
+.rule-tip-panel td { padding: 3px 0; border-top: 1px solid rgba(255,255,255,.15); color: var(--panel); background: transparent; }
+.rule-tip-panel td + td { text-align: right; padding-left: 8px; white-space: nowrap; }
+.rule-tip-panel .is-good { color: #7fd69b; }
+.rule-tip-panel .is-bad { color: #ff9a8f; }
+.rule-tip-panel .small { color: #C9CDCF; }
+.rule-tip-panel .btn { align-self: flex-start; }
+
+
+/* ─── PANEL OT 2.1.4: barra de filtros, mosaico de OT y ficha pegada a la vista ─── */
+/* La página hace scroll (no las columnas). La ficha usa position: sticky; app.js ajusta su "top"
+   (fitOrdersLayout) para que, si es más alta que la ventana, también se pueda ver su final. */
+.ot-toolbar {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px;
+  margin-top: 12px; padding: 8px 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line);
+}
+.ot-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.ot-chip {
+  --chip-color: var(--line-strong);
+  display: inline-flex; align-items: center; gap: 8px; height: 32px; padding: 0 6px 0 10px;
+  border: 1px solid var(--line); border-left: 3px solid var(--chip-color); border-radius: var(--radius);
+  background: var(--panel); color: var(--ink); font: 600 13px/1 var(--f-body); cursor: pointer; transition: var(--ct);
+}
+.ot-chip:hover { border-color: var(--ink); border-left-color: var(--chip-color); }
+.ot-chip-count {
+  min-width: 22px; height: 22px; padding: 0 6px; display: inline-grid; place-items: center;
+  border-radius: var(--radius); background: var(--panel-soft); font: 600 12px/1 var(--f-mono); color: var(--ink);
+}
+.ot-chip.active { background: var(--ink); color: var(--panel); border-color: var(--ink); border-left-color: var(--chip-color); }
+.ot-chip.active .ot-chip-count { background: var(--chip-color); color: #fff; }
+.ot-chip.is-pending   { --chip-color: #d97a1e; }
+.ot-chip.is-delivered { --chip-color: #1f8a44; }
+.ot-chip.is-prototype { --chip-color: var(--muted); }
+.ot-chip.is-warning   { --chip-color: var(--warn); }
+.ot-chip:focus-visible { outline: 2px solid var(--laser); outline-offset: 2px; }
+.ot-toolbar-actions { display: flex; flex-wrap: nowrap; gap: 6px; }
+.ot-toolbar-actions .btn { min-height: 32px; height: 32px; width: auto; }
+.ot-toolbar-actions .picker-trigger-btn { min-width: 190px; }
+
+.ot-layout {
+  display: grid; grid-template-columns: minmax(0, 1fr) clamp(420px, 42%, 620px);
+  gap: 16px; align-items: start; margin-top: 12px;
+}
+.ot-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(148px, 1fr));
+  gap: 8px; align-content: start; min-width: 0;
+}
+.ot-grid > .empty-state { grid-column: 1 / -1; }
+
+/* Tarjeta de OT del mosaico (conserva los colores de estado de .ot-card) */
+.ot-card.ot-tile {
+  flex-direction: column; align-items: stretch; gap: 6px; min-height: 128px; padding: 8px 10px;
+  border-left-width: 1px; border-top: 3px solid var(--line-strong); border-radius: var(--radius-card);
+}
+.ot-card.ot-tile.status-prospect         { border-top-color: #c9a24d; }
+.ot-card.ot-tile.status-accepted         { border-top-color: #9b7edc; }
+.ot-card.ot-tile.status-abonado,
+.ot-card.ot-tile.status-paid             { border-top-color: #4f86c8; }
+.ot-card.ot-tile.status-delivered-paid   { border-top-color: #3f9a5c; }
+.ot-card.ot-tile.status-delivered-unpaid { border-top-color: #db8a3f; }
+.ot-card.ot-tile.status-prototype        { border-top-color: var(--muted); }
+/* Entregadas: sin el dorado animado en el mosaico (paleta del manual: tinta, blanco y gris) */
+.ot-card.ot-tile.is-delivered { background: var(--panel); border-color: var(--line); animation: none; }
+.ot-card.ot-tile.is-delivered::after { display: none; }
+.ot-card.ot-tile.is-delivered.status-delivered-paid   { border-top-color: #3f9a5c; }
+.ot-card.ot-tile.is-delivered.status-delivered-unpaid { border-top-color: #db8a3f; }
+.ot-card.ot-tile.is-delivered .ot-card-title,
+.ot-card.ot-tile.is-delivered .ot-card-price { color: var(--ink); }
+.ot-card.ot-tile.is-delivered .ot-card-achievement { color: inherit; }
+body.theme-dark .ot-card.ot-tile.is-delivered { background: #1a1a1a; }
+.ot-card.ot-tile:hover { border-color: var(--ink); }
+.ot-card.ot-tile.selected { outline: 2px solid var(--ink); outline-offset: -1px; }
+.ot-tile-top { display: flex; align-items: center; gap: 6px; min-height: 22px; }
+.ot-tile-top .ot-card-number { font: 600 13px var(--f-mono); letter-spacing: 0; white-space: nowrap; }
+.ot-tile-state { display: inline-flex; align-items: center; gap: 5px; min-width: 0; max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ot-tile-state .order-status-dot { flex: none; }
+.ot-tile-top .ot-card-warn { margin-left: auto; width: 20px; height: 20px; font-size: 11px; }
+.ot-tile-top .ot-card-thumb { width: 28px; height: 28px; margin-left: auto; }
+.ot-tile-top .ot-card-warn + .ot-card-thumb { margin-left: 0; }
+.ot-tile .ot-card-title {
+  white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+  font: 700 14px/1.2 var(--f-disp); letter-spacing: .01em; min-height: 2.4em;
+}
+.ot-tile-status { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; font-size: 12px; color: var(--muted); line-height: 1.3; }
+.ot-tile-doc { font: 600 11px var(--f-mono); text-transform: uppercase; letter-spacing: .04em; }
+.ot-tile-doc.is-ok { color: var(--good); }
+.ot-tile-doc.is-missing { color: var(--warn); }
+.ot-tile-bottom { display: flex; align-items: center; justify-content: space-between; gap: 6px; margin-top: auto; }
+.ot-tile .ot-card-price { font: 600 15px var(--f-mono); }
+.ot-tile .ot-card-achievement .achievement-star { --star-size: 14px; }
+
+/* Ficha: sin scroll propio, pegada a la vista */
+.ot-preview { position: sticky; top: 16px; overflow: visible; }
+.ot-preview-body { overflow: visible; }
+.ot-preview-back { display: none; }
+/* Encabezado de la ficha: foto + título a lo ancho; "Editar" debajo, sin apretar el título */
+.ot-layout .ot-preview-head { display: grid; grid-template-columns: 88px minmax(0, 1fr); gap: 6px 14px; align-items: start; }
+.ot-layout .ot-preview-photo { width: 88px; height: 88px; }
+.ot-layout .ot-preview-title { font-size: 24px; overflow-wrap: anywhere; }
+.ot-layout .ot-preview-edit { grid-column: 1 / -1; justify-self: start; }
+
+/* Pantallas medianas: la ficha arriba (la OT elegida) y el mosaico debajo, a lo ancho */
+@media (max-width: 1100px) and (min-width: 781px) {
+  .ot-layout { grid-template-columns: minmax(0, 1fr); }
+  .ot-layout > .ot-preview { order: -1; position: static; }
+  .ot-preview-facts-3 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .ot-preview-columns { grid-template-columns: 1fr; }
+  .ot-preview-col + .ot-preview-col { margin-top: 10px; }
+}
+
+/* Móvil: mosaico de 2 columnas; la ficha se abre como hoja a pantalla completa */
+@media (max-width: 780px) {
+  .ot-toolbar { border: 0; padding: 0; }
+  .ot-chips { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); width: 100%; }
+  .ot-chip { justify-content: space-between; min-width: 0; }
+  .ot-chip-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ot-toolbar-actions { width: 100%; display: grid; grid-template-columns: minmax(0, 1fr) auto; }
+  .ot-layout { grid-template-columns: minmax(0, 1fr); margin-top: 10px; }
+  .ot-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+  .ot-card.ot-tile { min-height: 118px; padding: 7px 8px; }
+  .ot-tile .ot-card-title { font-size: 13.5px; }
+  .ot-tile .ot-card-price { font-size: 14px; }
+  .ot-preview { display: none; }
+  .ot-layout.is-ficha-open > .ot-preview {
+    display: block; position: fixed; inset: 0; z-index: 3000; top: 0 !important;
+    overflow-y: auto; overscroll-behavior: contain; border: 0; border-radius: 0; background: var(--panel);
+    padding: calc(10px + env(safe-area-inset-top, 0px)) 0 calc(16px + env(safe-area-inset-bottom, 0px));
+  }
+  .ot-layout.is-ficha-open > .ot-preview .ot-preview-back { display: inline-flex; margin: 0 12px 8px; }
+  .ot-preview-body { padding: 12px; }
+}
+
+/* ─── AYUDA TÉCNICA 2.1.5: la Política de precios explicada ─── */
+.pp-hero {
+  margin-top: 14px; padding: 16px 18px; border-radius: var(--radius-card);
+  background: #15181D; color: #fff; border: 1px solid #2E333A; border-left: 4px solid var(--laser);
+}
+.pp-kicker { font: 600 12px var(--f-mono); text-transform: uppercase; letter-spacing: .08em; color: #c9cdcf; }
+.pp-golden { margin: 6px 0 12px; font: 600 21px/1.3 var(--f-disp); letter-spacing: .01em; max-width: 60ch; }
+.pp-golden strong { color: var(--laser); }
+.pp-facts { display: flex; flex-wrap: wrap; gap: 6px; }
+.pp-fact {
+  display: inline-flex; flex-direction: column; gap: 2px; padding: 6px 10px; min-width: 110px;
+  border: 1px solid #3a4048; border-radius: var(--radius);
+}
+.pp-fact em { font-style: normal; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: #c9cdcf; }
+.pp-fact strong { font: 600 15px var(--f-mono); }
+.pp-fact strong.is-ok { color: #7fd69a; }
+.pp-fact strong.is-low { color: #ffb4a8; }
+
+.pp-block { margin-top: 22px; }
+.pp-title { display: flex; align-items: center; gap: 10px; margin: 0 0 4px; font: 700 20px var(--f-disp); letter-spacing: .02em; text-transform: uppercase; }
+.pp-title > span {
+  width: 26px; height: 26px; display: inline-grid; place-items: center; flex: none;
+  border-radius: var(--radius); background: var(--ink); color: var(--panel); font: 600 13px var(--f-mono);
+}
+.pp-lead { margin: 0 0 10px; color: var(--muted); max-width: 75ch; line-height: 1.45; }
+.pp-note { margin: 10px 0 0; font-size: 13px; color: var(--muted); max-width: 80ch; line-height: 1.45; }
+
+/* Calculadora */
+.pp-calc { display: grid; grid-template-columns: minmax(200px, 260px) minmax(0, 1fr); gap: 14px; align-items: start; }
+.pp-calc-inputs {
+  display: grid; gap: 8px; padding: 12px; border: var(--border); border-radius: var(--radius-card); background: var(--panel-soft);
+}
+.pp-calc-inputs label { display: grid; gap: 4px; height: auto; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+.pp-calc-inputs input, .pp-calc-inputs select { width: 100%; font-family: var(--f-mono); }
+.pp-calc-note { margin: 2px 0 0; font-size: 12px; color: var(--muted); }
+@media (min-width: 901px) { .pp-calc-inputs { position: sticky; top: 16px; } }
+.pp-steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.pp-step {
+  display: grid; grid-template-columns: 30px minmax(0, 1fr) auto; gap: 10px; align-items: center;
+  padding: 8px 12px; border: var(--border); border-radius: var(--radius); background: var(--panel);
+}
+.pp-step-n {
+  width: 26px; height: 26px; display: grid; place-items: center; border-radius: 50%;
+  border: 1px solid var(--line-strong); font: 600 12px var(--f-mono); color: var(--muted);
+}
+.pp-step-body { display: grid; gap: 1px; min-width: 0; }
+.pp-step-body strong { font-size: 14px; }
+.pp-step-formula { font: 500 13px var(--f-mono); color: var(--ink); overflow-wrap: anywhere; }
+.pp-step-note { font-size: 12px; color: var(--muted); }
+.pp-step-value { font: 600 16px var(--f-mono); white-space: nowrap; }
+.pp-step.is-total { background: var(--panel-soft); border-color: var(--ink); }
+.pp-step.is-total .pp-step-n, .pp-step.is-final .pp-step-n { border-color: var(--ink); background: var(--ink); color: var(--panel); }
+.pp-step.is-final { border: 2px solid var(--ink); }
+.pp-step.is-final .pp-step-value { font-size: 20px; }
+.pp-check {
+  display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 18px; padding: 8px 12px;
+  border-radius: var(--radius); background: var(--panel-soft); font-size: 13px;
+}
+.pp-check strong { font-family: var(--f-mono); font-size: 15px; }
+.pp-check strong.is-ok { color: var(--good); }
+.pp-check strong.is-low { color: var(--warn); }
+.pp-check-note { color: var(--muted); }
+.pp-tip { padding: 8px 12px; border-left: 3px solid var(--laser); background: var(--panel-soft); font-size: 13px; line-height: 1.45; }
+
+/* Comparaciones */
+.pp-compare { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; max-width: 760px; }
+.pp-card { padding: 12px 14px; border: var(--border); border-top: 3px solid var(--line-strong); border-radius: var(--radius-card); background: var(--panel); }
+.pp-card.is-good { border-top-color: var(--good); }
+.pp-card p { margin: 8px 0 0; font-size: 13px; color: var(--muted); line-height: 1.45; }
+.pp-card-tag { display: block; margin-bottom: 6px; font: 700 15px var(--f-disp); text-transform: uppercase; letter-spacing: .06em; }
+.pp-row { display: flex; justify-content: space-between; gap: 10px; padding: 3px 0; font-size: 14px; }
+.pp-row strong { font-family: var(--f-mono); }
+.pp-row.is-sum { margin-top: 4px; padding-top: 6px; border-top: 1px solid var(--line); }
+.pp-row.is-sum strong { font-size: 17px; }
+.pp-big { font: 600 28px var(--f-mono); }
+.pp-big small { font-size: 14px; color: var(--muted); }
+
+/* Horas y CIF */
+.pp-hours, .pp-cif { max-width: 760px; }
+.pp-hours-bar, .pp-cif-bar { display: flex; height: 28px; border-radius: var(--radius); overflow: hidden; border: var(--border); background: var(--panel-soft); }
+.pp-hours-bar span {
+  display: flex; align-items: center; padding: 0 10px; background: var(--ink); color: var(--panel);
+  font: 600 12px var(--f-mono); white-space: nowrap; overflow: hidden;
+}
+.pp-hours-bar em { display: flex; align-items: center; padding: 0 8px; font: 500 12px var(--f-mono); font-style: normal; color: var(--muted); }
+.pp-hours-caption { margin: 6px 0 14px; font-size: 13px; color: var(--muted); }
+.pp-cif-bar span.is-cash, .pp-cif-legend i.is-cash { background: var(--ink); }
+.pp-cif-bar span.is-opp, .pp-cif-legend i.is-opp { background: var(--line-strong); }
+.pp-cif-legend { display: grid; gap: 4px; margin-top: 8px; font-size: 13px; }
+.pp-cif-legend span { display: flex; align-items: center; gap: 8px; }
+.pp-cif-legend i { width: 12px; height: 12px; border-radius: 2px; flex: none; }
+.pp-cif-legend strong { margin-left: auto; font-family: var(--f-mono); }
+.pp-cif-legend .is-sum { padding-top: 6px; border-top: 1px solid var(--line); font-weight: 600; }
+
+.pp-table td span { display: block; font-size: 12px; color: var(--muted); }
+.pp-donts { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; max-width: 80ch; }
+.pp-donts li { display: flex; gap: 10px; align-items: baseline; padding: 8px 12px; border: var(--border); border-radius: var(--radius); background: var(--panel); font-size: 14px; }
+.pp-donts b { color: var(--warn); font-size: 15px; }
+
+@media (max-width: 900px) {
+  .pp-calc { grid-template-columns: 1fr; }
+  .pp-calc-inputs { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .pp-calc-note { grid-column: 1 / -1; }
+}
+@media (max-width: 560px) {
+  .pp-compare { grid-template-columns: 1fr; }
+  .pp-golden { font-size: 18px; }
+  .pp-step { grid-template-columns: 26px minmax(0, 1fr); }
+  .pp-step-value { grid-column: 2; }
+}
+

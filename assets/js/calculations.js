@@ -172,6 +172,69 @@ window.ERMCalc = (() => {
     return (state.database.materials || []).find((item) => item.id === materialId) || null;
   }
 
+  // ---- IVA de compra (Política de precios v1) ----
+  // baseCost es siempre el precio NETO del insumo. Cómo se compra decide cuánto cuesta de verdad:
+  //   'boleta'  → el IVA no se recupera: costo = neto × (1 + IVA)
+  //   'factura' → el IVA es crédito fiscal: costo = neto
+  //   'exento'  → sin IVA (láser propio, servicios): costo = neto
+  const PURCHASE_DOCS = ['boleta', 'factura', 'exento'];
+  const PRICING_RULE_VERSION = 2;
+
+  function normalizePurchaseDoc(value, fallback = 'boleta') {
+    return PURCHASE_DOCS.includes(value) ? value : fallback;
+  }
+
+  function purchaseIvaFactor(purchaseDoc, ivaRate) {
+    return purchaseDoc === 'boleta' ? 1 + Math.max(0, asNumber(ivaRate)) : 1;
+  }
+
+  // Costo neto por unidad de cálculo (cm², unidad del rendimiento, minuto o unidad).
+  function materialUnitCostNet(material) {
+    const baseCost = asNumber(material?.baseCost);
+    if (material?.calculationUnit === 'cm2') {
+      const area = asNumber(material.widthCm) * asNumber(material.heightCm);
+      return area > 0 ? baseCost / area : 0;
+    }
+    if (material?.calculationUnit === 'rendimiento') {
+      const yieldQuantity = asNumber(material.yieldQuantity);
+      return yieldQuantity > 0 ? baseCost / yieldQuantity : 0;
+    }
+    return baseCost;
+  }
+
+  // Costos de un material de la base: neto por unidad y efectivo según su forma de compra habitual.
+  // unitCost (efectivo) es el contrato con las demás apps: se usa tal cual, sin volver a tocar el IVA.
+  function materialCosts(material, ivaRate) {
+    const isService = material?.calculationUnit === 'min';
+    const purchaseDoc = normalizePurchaseDoc(material?.purchaseDoc, isService ? 'exento' : 'boleta');
+    // Base antigua (sin purchaseDoc): baseCost era el precio pagado con boleta y unitCost ya era el costo
+    // efectivo. Se usa tal cual para no sumar el IVA dos veces.
+    if (material && !material.purchaseDoc && material.unitCost !== undefined) {
+      const unitCost = asNumber(material.unitCost);
+      const factor = purchaseIvaFactor(purchaseDoc, ivaRate);
+      return { purchaseDoc, unitCostNet: unitCost / factor, unitCost, grossBaseCost: asNumber(material.baseCost), legacy: true };
+    }
+    const unitCostNet = materialUnitCostNet(material);
+    return {
+      purchaseDoc,
+      unitCostNet,
+      unitCost: unitCostNet * purchaseIvaFactor(purchaseDoc, ivaRate),
+      grossBaseCost: Math.round(asNumber(material?.baseCost) * (1 + Math.max(0, asNumber(ivaRate))))
+    };
+  }
+
+  // Precio equivalente de una OT antigua con un costo nuevo, manteniendo su margen real original.
+  function restatePrice(originalSummary, newTotalCost, ivaRate) {
+    const originalNet = asNumber(originalSummary?.effectiveNet);
+    const originalCost = asNumber(originalSummary?.totalCost);
+    const margin = originalNet > 0 ? (originalNet - originalCost) / originalNet : 0;
+    const safeMargin = Math.min(0.95, margin);
+    const net = roundMoney(asNumber(newTotalCost) / (1 - safeMargin));
+    const gross = roundMoney(net * (1 + Math.max(0, asNumber(ivaRate))));
+    const marginAtOriginalPrice = originalNet > 0 ? (originalNet - asNumber(newTotalCost)) / originalNet : 0;
+    return { margin, net, gross, marginAtOriginalPrice, totalCost: roundMoney(newTotalCost) };
+  }
+
   function getEmployee(state, employeeId) {
     return (state.scenario.employees || []).find((item) => item.id === employeeId) || null;
   }
@@ -303,10 +366,21 @@ window.ERMCalc = (() => {
     const learningFactor = learningCurveFactor(pieceQuantity, learningRate);
     const isPerOrder = (line) => line.scope === 'order';
 
+    const ivaRate = Math.max(0, asNumber(scenario.ivaRate));
     const materialLines = (quote.materials || []).map((line) => {
       const material = getMaterial(state, line.materialId);
       const quantity = asNumber(line.quantity);
-      const unitCost = asNumber(material?.unitCost);
+      // OT antigua (regla 1): el costo unitario queda congelado en el que se cotizó.
+      const hasSnapshot = line.unitCostSnapshot !== '' && line.unitCostSnapshot !== null && line.unitCostSnapshot !== undefined
+        && Number.isFinite(Number(line.unitCostSnapshot));
+      const costs = materialCosts(material, ivaRate);
+      // La línea puede cambiar boleta/factura; los insumos sin IVA (láser propio) no.
+      const purchaseDoc = hasSnapshot
+        ? 'congelado'
+        : (costs.purchaseDoc === 'exento' ? 'exento' : normalizePurchaseDoc(line.purchaseDoc, costs.purchaseDoc));
+      const unitCostNet = hasSnapshot ? asNumber(line.unitCostSnapshot) : costs.unitCostNet;
+      const unitCost = hasSnapshot ? asNumber(line.unitCostSnapshot) : unitCostNet * purchaseIvaFactor(purchaseDoc, ivaRate);
+      const listPrice = asNumber(material?.listPrice);
       // La merma se ingresa en % (10 = 10%); wasteRate es la fracción para calcular.
       const wastePercent = Math.max(0, asNumber(line.wastePercent));
       const wasteRate = wastePercent / 100;
@@ -315,21 +389,34 @@ window.ERMCalc = (() => {
       const effectiveQuantity = asNumber((quantity * (1 + wasteRate)).toFixed(4));
       const lineTotal = roundMoney(baseLineTotal + wasteAmount);
       const scope = isPerOrder(line) ? 'order' : 'unit';
+      const orderTotal = roundMoney(scope === 'order' ? lineTotal : lineTotal * pieceQuantity);
+      // IVA de boleta dentro del costo: lo que se ahorraría comprando con factura.
+      const boletaIva = purchaseDoc === 'boleta' ? roundMoney(orderTotal - orderTotal / (1 + ivaRate)) : 0;
+      // Precio de lista (ej. láser como servicio solicitado): sin merma, por la cantidad cotizada.
+      const listTotal = listPrice > 0 ? roundMoney(quantity * listPrice * (scope === 'order' ? 1 : pieceQuantity)) : 0;
       return {
         ...line,
         scope,
         material,
         quantity,
+        purchaseDoc,
+        unitCostNet,
         unitCost,
+        listPrice,
         wastePercent,
         wasteRate,
         effectiveQuantity,
         baseLineTotal,
         wasteAmount,
         lineTotal,
-        orderTotal: roundMoney(scope === 'order' ? lineTotal : lineTotal * pieceQuantity)
+        orderTotal,
+        boletaIva,
+        listTotal
       };
     });
+    const materialsBoletaIva = roundMoney(materialLines.reduce((acc, line) => acc + line.boletaIva, 0));
+    const listPriceNet = roundMoney(materialLines.reduce((acc, line) => acc + line.listTotal, 0));
+    const hasFrozenCosts = materialLines.some((line) => line.purchaseDoc === 'congelado');
 
     // La OT puede definir su propia eficiencia (ej. trabajo casi solo de máquina ≈ 100%);
     // si no la define, se usa la del escenario.
@@ -442,9 +529,13 @@ window.ERMCalc = (() => {
         projection
       },
       quoteSummary: {
+        pricingRuleVersion: hasFrozenCosts ? 1 : PRICING_RULE_VERSION,
+        costBasis: hasFrozenCosts ? 'bruto' : 'neto',
         materialLines,
         laborLines,
         materialsTotal,
+        materialsBoletaIva,
+        listPriceNet,
         laborTotal,
         totalLaborHours,
         ownLaborTotal,
@@ -521,6 +612,13 @@ window.ERMCalc = (() => {
     targetPrice,
     projectionSummary,
     annualSalesGoal,
+    PURCHASE_DOCS,
+    PRICING_RULE_VERSION,
+    normalizePurchaseDoc,
+    purchaseIvaFactor,
+    materialUnitCostNet,
+    materialCosts,
+    restatePrice,
     calculateQuote
   };
 })();

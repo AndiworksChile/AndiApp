@@ -61,4 +61,15 @@ Stage 3 features (2.1.2):
 - OT ficha has a "Tiempo" tab (`getOrderTimeDetail`): human hours, machine hours, total, per shift and per machine.
 - The login screen (sync.js) uses `assets/logo/logoapp.svg` with a CSS laser-cut animation; model-viewer is no longer loaded.
 
+Panel OT (2.1.4): a toolbar of chips (`ORDER_GROUPS` + `ORDER_WARNINGS_GROUP`, "Mostrar primero"; Advertencias = `getOrderWarnings()`), a mosaic of compact tiles (`.ot-card.ot-tile` in `.ot-grid`, CSS grid auto-fill) and the ficha (`.ot-preview`). The PAGE scrolls, never the columns: the ficha is `position: sticky` and `fitOrdersLayout()` sets a negative `top` when it is taller than the window. On mobile the ficha opens as a full-screen sheet (`state.ui.orderFichaOpen`, "‹ Volver"). Delivered tiles are not gold (brand palette).
+
+2.1.5: Ayuda técnica (`docs` view) has two tabs (`state.ui.docsTab`): "Política de precios" (`renderDocsPolicy`, a didactic version of `POLITICA-DE-PRECIOS.md` with live Escenario values and a step-by-step calculator: `[data-docs-calc]` inputs update `#docs-calc-steps` without re-rendering) and "Fórmulas de la app". If the policy changes, update both the .md and this view.
+
+Pricing policy v1 (2.1.3, see `POLITICA-DE-PRECIOS.md`, the single rule for every app):
+- `material.baseCost` is always NET; `material.purchaseDoc` = `boleta` (IVA is cost: ×1.19) | `factura` (net) | `exento`. `ERMCalc.materialCosts()` resolves `unitCost` (effective) and `unitCostNet`; other apps read `unitCost` as is and never strip IVA themselves.
+- Materials without `purchaseDoc` are legacy (pre-policy): they keep their stored `unitCost` until reviewed in Base de datos › "Revisar IVA" (`renderNetReviewPanel`, `ERMStorage.convertLegacyMaterial`). `database.costBasis` is `neto` only when none is pending. Never bulk-convert prices: some legacy values are gross, others were already corrected to net.
+- Quote lines may override `purchaseDoc` (Boleta/Factura select). `materialsBoletaIva` = savings if bought with factura; `material.listPrice` (laser service $350/min) is a sale-price hint, never a cost.
+- OT with `pricingRuleVersion` < 2 are legacy: `loadOrderIntoQuote` freezes their unit costs (`line.unitCostSnapshot`); the OT ficha shows an ⓘ comparison (`renderOrderRuleTip`); "Recalcular con la regla nueva" is per OT and keeps `originalQuote/originalQuoteSummary` for "Volver al cálculo original".
+- When `calculations.js` changes, re-copy it into `QRapp/src/core/andiapp-calc.js` (rebuild QRApp) and the `ERMCALC` block of `LetrasAcrilico/index.html`.
+
 Before editing, read the relevant render function in app.js and the state slice it touches. Visual changes go in `assets/css/styles.css`.

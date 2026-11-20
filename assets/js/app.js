@@ -2805,6 +2805,7 @@ Objetivo
     return { shifts, machines, personMs, machineMs, totalMs: personMs + machineMs, byPerson, byMachine };
   }
 
+
   function formatMsAsHours(ms) {
     return formatHoursMinutes((Number(ms) || 0) / 3600000);
   }
@@ -4020,6 +4021,10 @@ Objetivo
         if (row) {
           // Se permite repetir el mismo insumo en varias líneas para diferenciar
           // a qué parte del producto se destina (ver casilla de comentario por línea).
+          if (row.materialId !== materialId) {
+            delete row.purchaseDoc;
+            delete row.unitCostSnapshot;
+          }
           row.materialId = materialId;
           const material = state.database.materials.find((item) => item.id === materialId);
           if (material) row.group = material.group;
@@ -4461,10 +4466,21 @@ Objetivo
       if (action === 'open-order-card') {
         state.ui.selectedOrderId = actionBtn.dataset.id || null;
         state.currentView = 'orders';
+        state.ui.orderFichaOpen = isMobileViewport();
         render();
+        const ficha = document.querySelector('.ot-preview');
         if (isMobileViewport()) {
-          document.querySelector('.ot-preview')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          if (ficha) ficha.scrollTop = 0;
+        } else if (ficha && ficha.getBoundingClientRect().top < 0) {
+          // Ficha más alta que la ventana y fuera de vista: se sube hasta su encabezado.
+          window.scrollTo({ top: window.scrollY + ficha.getBoundingClientRect().top - 16, behavior: 'smooth' });
         }
+      }
+
+      if (action === 'close-order-ficha') {
+        state.ui.orderFichaOpen = false;
+        render();
+        return;
       }
 
       if (action === 'scroll-quote-step') {
@@ -4536,6 +4552,61 @@ Objetivo
 
       if (action === 'reset-quote-efficiency') {
         state.quote.efficiency = null;
+        render();
+        return;
+      }
+
+      if (action === 'set-docs-tab') {
+        state.ui.docsTab = actionBtn.dataset.tab === 'formulas' ? 'formulas' : 'policy';
+        render();
+        return;
+      }
+
+      if (action === 'open-net-review') {
+        state.ui.netReviewOpen = true;
+        render();
+        return;
+      }
+
+      if (action === 'close-net-review') {
+        state.ui.netReviewOpen = false;
+        render();
+        return;
+      }
+
+      if (action === 'apply-net-review') {
+        applyNetReviewFromPanel();
+        return;
+      }
+
+      if (action === 'apply-new-pricing-rule') {
+        if (!window.confirm('¿Recalcular esta OT con la regla nueva? Los insumos toman su costo actual de la base (boleta / factura). El cálculo original se guarda y puedes volver a él desde el Panel OT.')) return;
+        (state.quote.materials || []).forEach((line) => { delete line.unitCostSnapshot; });
+        state.quote.pricingRuleVersion = window.ERMCalc.PRICING_RULE_VERSION;
+        state.quote.costBasis = 'neto';
+        render();
+        return;
+      }
+
+      if (action === 'use-list-price') {
+        state.quote.selectedPriceMode = 'custom';
+        state.quote.customPriceGross = Number(actionBtn.dataset.gross) || 0;
+        render();
+        return;
+      }
+
+      if (action === 'restore-original-pricing') {
+        const record = findOrderById(actionBtn.dataset.id);
+        if (!record?.originalQuoteSummary) return;
+        if (!window.confirm('¿Volver al cálculo original de esta OT (regla antigua)? Se descarta el recálculo con la regla nueva.')) return;
+        record.quote = record.originalQuote || record.quote;
+        record.quoteSummary = record.originalQuoteSummary;
+        if (record.originalScenarioSnapshot) record.scenarioSnapshot = record.originalScenarioSnapshot;
+        delete record.originalQuote;
+        delete record.originalQuoteSummary;
+        delete record.originalScenarioSnapshot;
+        logActivity(`OT ${record.orderNumber || ''}: vuelve al cálculo original`);
+        stampBaseUpdate('orders');
         render();
         return;
       }
@@ -6206,7 +6277,7 @@ Objetivo
           state.ui.databaseDraft.group = target.value;
         }
         const dbKey = target.dataset.dbDraft;
-        if (dbKey === 'calculationUnit' || dbKey === 'groupSelection') render();
+        if (dbKey === 'calculationUnit' || dbKey === 'groupSelection' || dbKey === 'purchaseDoc') render();
         else if (['baseCost', 'widthCm', 'heightCm', 'yieldQuantity', 'yieldUnit'].includes(dbKey)) refreshMobileFormula();
         return;
       }
@@ -6400,6 +6471,12 @@ Objetivo
             if (material) {
               row.group = material.group;
             }
+            // Insumo nuevo: parte con su forma de compra habitual y sin costo congelado.
+            delete row.purchaseDoc;
+            delete row.unitCostSnapshot;
+            mustRerenderMain = true;
+          }
+          if (row && target.dataset.key === 'purchaseDoc') {
             mustRerenderMain = true;
           }
           if (row && (target.dataset.key === 'quantity' || target.dataset.key === 'wastePercent')) {
@@ -6447,6 +6524,10 @@ Objetivo
     });
 
     document.addEventListener('input', (event) => {
+      if (event.target?.dataset?.docsCalc) {
+        updateDocsCalculator();
+        return;
+      }
       if (event.target?.id === 'quote-mat-search') {
         // Solo se repinta la lista de resultados para no perder el foco del buscador.
         state.ui.quoteMatQuery = event.target.value;
@@ -6974,6 +7055,8 @@ Objetivo
     const name = document.getElementById('material-name').value.trim();
     const baseCost = parseClpNumber(document.getElementById('material-base-cost').value);
     const notes = document.getElementById('material-notes').value.trim();
+    const purchaseDoc = document.getElementById('material-purchase-doc')?.value || state.ui.databaseDraft?.purchaseDoc || '';
+    const listPrice = parseClpNumber(document.getElementById('material-list-price')?.value || '0');
 
     const provider = document.getElementById('material-provider').value.trim();
     const supplierAddress = document.getElementById('material-supplier-address').value.trim();
@@ -6983,6 +7066,8 @@ Objetivo
       name,
       calculationUnit,
       baseCost,
+      purchaseDoc,
+      listPrice,
       notes,
       provider,
       supplierAddress,
@@ -7004,10 +7089,11 @@ Objetivo
 
     if (state.ui.editingMaterialId) {
       const current = state.database.materials.find((item) => item.id === state.ui.editingMaterialId);
-      Object.assign(current, payload);
+      Object.assign(current, payload, { netReviewedAt: new Date().toISOString() });
     } else {
       state.database.materials.push({ id: uid('mat'), ...payload });
     }
+    window.ERMStorage.refreshCostBasis(state.database);
 
     state.ui.editingMaterialId = null;
     state.ui.databaseDraft = null;
@@ -7568,7 +7654,11 @@ Objetivo
       invoicePdfName: '',
       invoicePdfMimeType: '',
       invoicePdfSizeKb: 0,
-      quote: JSON.parse(JSON.stringify(state.quote)),
+      quote: {
+        ...JSON.parse(JSON.stringify(state.quote)),
+        pricingRuleVersion: calc.quoteSummary.pricingRuleVersion,
+        costBasis: calc.quoteSummary.costBasis
+      },
       quoteSummary: JSON.parse(JSON.stringify(calc.quoteSummary)),
       scenarioSnapshot: JSON.parse(JSON.stringify(state.scenario))
     };
@@ -7609,8 +7699,19 @@ Objetivo
 
     if (existingIndex >= 0) {
       record.id = state.orders[existingIndex].id;
-      const existingAttachments = getOwnerAttachments(state.orders[existingIndex], legacyOrderInvoiceAttachment);
+      const existing = state.orders[existingIndex];
+      const existingAttachments = getOwnerAttachments(existing, legacyOrderInvoiceAttachment);
       record.attachments = record.attachments.length ? record.attachments : existingAttachments;
+      // OT antigua recalculada con la regla nueva: se guarda el cálculo original para poder volver.
+      if (existing.originalQuoteSummary) {
+        record.originalQuote = existing.originalQuote;
+        record.originalQuoteSummary = existing.originalQuoteSummary;
+        record.originalScenarioSnapshot = existing.originalScenarioSnapshot;
+      } else if (isLegacyPricingOrder(existing) && !isLegacyPricingOrder(record)) {
+        record.originalQuote = existing.quote;
+        record.originalQuoteSummary = existing.quoteSummary;
+        record.originalScenarioSnapshot = existing.scenarioSnapshot;
+      }
       state.orders[existingIndex] = record;
     } else {
       state.orders.unshift(record);
@@ -7969,6 +8070,74 @@ Objetivo
     render();
   }
 
+  // Recalcula una OT guardada con la regla nueva (base actual, boleta/factura de cada insumo) y con su
+  // escenario guardado, para aislar el efecto de los materiales. No modifica la OT.
+  function restateOrderWithNewRule(order, forceDoc = '') {
+    const quote = JSON.parse(JSON.stringify(order.quote || {}));
+    (quote.materials || []).forEach((line) => {
+      delete line.unitCostSnapshot;
+      if (forceDoc) line.purchaseDoc = forceDoc;
+    });
+    const scenario = { ...state.scenario, ...(order.scenarioSnapshot || {}) };
+    const summary = window.ERMCalc.calculateQuote({ ...state, scenario, quote }).quoteSummary;
+    return window.ERMCalc.restatePrice(order.quoteSummary || {}, summary.totalCost, scenario.ivaRate);
+  }
+
+  // Ícono ⓘ en las OT con la regla antigua: precio cobrado vs. el que daría la regla nueva.
+  function renderOrderRuleTip(order) {
+    const sum = order?.quoteSummary || {};
+    if (!isLegacyPricingOrder(order) && !order?.originalQuoteSummary) return '';
+    if (!isLegacyPricingOrder(order)) {
+      return `<span class="rule-tip" tabindex="0" aria-label="OT recalculada con la regla nueva">${iconSvg('info', 'info-tip-icon')}
+        <span class="rule-tip-panel" role="tooltip">
+          <strong>Recalculada con la regla nueva</strong>
+          <span>Precio original: ${formatCurrency(order.originalQuoteSummary.effectiveGross || 0)} · margen ${formatPercent(order.originalQuoteSummary.realMargin || 0)}</span>
+          <button type="button" class="btn btn-soft btn-xs" data-action="restore-original-pricing" data-id="${sanitize(order.id)}">Volver al cálculo original</button>
+        </span></span>`;
+    }
+    if (!Array.isArray(order?.quote?.materials) || !(Number(sum.effectiveNet) > 0)) return '';
+    let current;
+    let factura;
+    try {
+      current = restateOrderWithNewRule(order);
+      factura = restateOrderWithNewRule(order, 'factura');
+    } catch (error) {
+      console.warn('No se pudo recalcular la OT con la regla nueva.', error);
+      return '';
+    }
+    const charged = Number(sum.effectiveGross) || 0;
+    const row = (label, data) => {
+      const diff = Math.round(data.gross - charged);
+      return `<tr><td>${label}</td><td class="mono">${formatCurrency(data.gross)}</td><td class="mono ${diff < 0 ? 'is-good' : diff > 0 ? 'is-bad' : ''}">${Math.abs(diff) < 1 ? 'sin cambio' : `${diff > 0 ? '+' : '−'}${formatCurrency(Math.abs(diff))} (${formatPercent(charged ? Math.abs(diff) / charged : 0)})`}</td></tr>`;
+    };
+    return `<span class="rule-tip" tabindex="0" aria-label="Comparar con la regla nueva de precios">${iconSvg('info', 'info-tip-icon')}
+      <span class="rule-tip-panel" role="tooltip">
+        <strong>Calculada con la regla antigua</strong>
+        <span>No cambia: se cobró ${formatCurrency(charged)}. Precio con el mismo margen (${formatPercent(current.margin)}):</span>
+        <table>
+          ${row('Regla nueva, base actual', current)}
+          ${row('Si se compraba con factura', factura)}
+        </table>
+        <span class="small">Margen al precio cobrado: regla nueva ${formatPercent(current.marginAtOriginalPrice)} · con factura ${formatPercent(factura.marginAtOriginalPrice)}.</span>
+      </span></span>`;
+  }
+
+  // OT de antes de la Política de precios v1 (materiales cotizados con el precio pagado, sin boleta/factura).
+  function isLegacyPricingOrder(record) {
+    return !(Number(record?.quote?.pricingRuleVersion) >= 2 || Number(record?.quoteSummary?.pricingRuleVersion) >= 2);
+  }
+
+  // Al abrir una OT antigua, cada insumo queda con el costo unitario con que se cotizó.
+  function freezeLegacyQuoteCosts(quote, summary) {
+    const summaryLines = Array.isArray(summary?.materialLines) ? summary.materialLines : [];
+    (quote.materials || []).forEach((line, index) => {
+      const match = summaryLines.find((item) => item.id && item.id === line.id) || summaryLines[index];
+      if (match && Number.isFinite(Number(match.unitCost))) line.unitCostSnapshot = Number(match.unitCost);
+    });
+    quote.pricingRuleVersion = 1;
+    quote.costBasis = 'bruto';
+  }
+
   function loadOrderIntoQuote(orderId) {
     const record = findOrderById(orderId);
     if (!record?.quote) {
@@ -7980,6 +8149,7 @@ Objetivo
       ...JSON.parse(JSON.stringify(window.ERMDefaults.quote)),
       ...JSON.parse(JSON.stringify(record.quote))
     };
+    if (isLegacyPricingOrder(record)) freezeLegacyQuoteCosts(state.quote, record.quoteSummary);
     const orderAttachments = getOwnerAttachments(record, legacyOrderInvoiceAttachment);
     window.ERMStorage.normalizeQuotePriceMode(state.quote, state.scenario?.ivaRate);
     state.quote.estimatedDeliveryDate = record.estimatedDeliveryDate || state.quote.estimatedDeliveryDate || '';
@@ -8680,7 +8850,7 @@ Objetivo
       },
       {
         filename: getBackupFileName('database'),
-        payload: { app: 'AndiApp', exportedAt, materials: state.database.materials || [] }
+        payload: { app: 'AndiApp', exportedAt, costBasis: state.database.costBasis || 'pendiente', materials: state.database.materials || [] }
       },
       {
         filename: getBackupFileName('productTypes'),
@@ -9060,11 +9230,25 @@ Objetivo
       heightCm: Number(item.heightCm || 0) || 0,
       yieldQuantity: Number(item.yieldQuantity || 0) || 0,
       yieldUnit: item.yieldUnit || 'm²',
+      // Política de precios v1: forma de compra, costo neto por unidad y precio de lista (opcional).
+      ...(item.purchaseDoc ? { purchaseDoc: window.ERMCalc.normalizePurchaseDoc(item.purchaseDoc) } : {}),
+      ...(item.unitCostNet !== undefined ? { unitCostNet: Number(item.unitCostNet) || 0 } : {}),
+      listPrice: Number(item.listPrice || 0) || 0,
       imageDataUrl: item.imageDataUrl || item.image || '',
       imageName: item.imageName || '',
       imageMimeType: item.imageMimeType || '',
       imageSizeKb: Number(item.imageSizeKb || 0) || 0
     };
+  }
+
+  // Materiales importados: si vienen de una base anterior a la Política de precios (precio pagado, sin
+  // purchaseDoc), se pasan a neto con la misma migración de ERMStorage para no sumar el IVA dos veces.
+  function adoptImportedMaterials(source) {
+    const materials = source.map(normalizeMaterialRecord).filter((item) => item.name);
+    const temp = { database: { materials }, scenario: state.scenario, orders: state.orders, quote: state.quote };
+    window.ERMStorage.migrateMaterialsToNetBasis(temp);
+    state.database.costBasis = temp.database.costBasis;
+    return temp.database.materials;
   }
 
   async function importAllBasesFromFiles(files) {
@@ -9142,7 +9326,7 @@ Objetivo
 
       if (Array.isArray(parsed?.materials) || Array.isArray(parsed?.database?.materials)) {
         const source = parsed.materials || parsed.database?.materials || [];
-        state.database.materials = source.map(normalizeMaterialRecord).filter((item) => item.name);
+        state.database.materials = adoptImportedMaterials(source);
         databaseUpdated = true;
       }
 
@@ -9503,6 +9687,7 @@ Objetivo
     const payload = {
       app: 'AndiApp',
       exportedAt: new Date().toISOString(),
+      costBasis: state.database.costBasis || 'pendiente',
       imagesExported: imageEntries.map((entry) => ({ id: entry.id, name: entry.name, fileName: entry.fileName })),
       materials: (state.database.materials || []).map((item) => ({
         ...item,
@@ -9751,7 +9936,7 @@ Objetivo
         return;
       }
 
-      state.database.materials = source.map(normalizeMaterialRecord).filter((item) => item.name);
+      state.database.materials = adoptImportedMaterials(source);
 
       state.ui.databaseFilter = 'Todos';
       state.ui.databaseDraft = null;
@@ -9767,8 +9952,8 @@ Objetivo
   }
 
   function render() {
-    const otListScroll = refs.mainPanel?.querySelector('.ot-grid')?.scrollTop || 0;
     window.ERMStorage.save(state);
+    if (state.currentView !== 'orders') state.ui.orderFichaOpen = false;
     const calc = window.ERMCalc.calculateQuote(state);
     renderTabs();
     renderSidebarLinks();
@@ -9778,11 +9963,7 @@ Objetivo
     syncAttendanceChronometer();
     syncLiveTimers();
     renderActivityLog();
-    if (state.currentView === 'orders') {
-      fitOrdersLayout();
-      const grid = refs.mainPanel.querySelector('.ot-grid');
-      if (grid) grid.scrollTop = otListScroll;
-    }
+    if (state.currentView === 'orders') fitOrdersLayout();
   }
 
   function captureOpenFinanceDetailsState() {
@@ -10595,6 +10776,8 @@ Objetivo
     { key: 'prototype', label: 'Prototipos', className: 'is-prototype' }
   ];
 
+  const ORDER_WARNINGS_GROUP = { key: 'warnings', label: 'Advertencias', className: 'is-warning' };
+
   function getOrderGroup(order) {
     if (isPrototypeOrder(order)) return 'prototype';
     return isDeliveryCompleted(order.deliveryState || order.quote?.deliveryState) ? 'delivered' : 'pending';
@@ -10810,6 +10993,49 @@ Objetivo
       </div>`;
   }
 
+  // Aviso de la Política de precios en el paso de materiales: OT antigua (costos congelados) o
+  // cuánto bajaría el costo si lo que está con boleta se comprara con factura.
+  function renderQuotePurchaseNotice(summary) {
+    if (summary.costBasis === 'bruto') {
+      return `
+        <div class="quote-rule-notice is-legacy" role="note">
+          <div><strong>OT con la regla antigua.</strong> Sus insumos quedan con el costo con que se cotizó, para no cambiar lo que ya se cobró.</div>
+          <button type="button" class="btn btn-soft btn-xs" data-action="apply-new-pricing-rule">Recalcular con la regla nueva</button>
+        </div>`;
+    }
+    const savings = Number(summary.materialsBoletaIva) || 0;
+    if (savings <= 0) return '';
+    return `
+      <div class="quote-rule-notice" role="note">
+        <div>Con boleta pagas ${formatCurrency(savings)} de IVA que no recuperas. Si compras con factura lo marcado como boleta, el costo de la OT baja ${formatCurrency(savings)}.</div>
+      </div>`;
+  }
+
+  function renderListPriceHint(summary) {
+    const listNet = Number(summary.listPriceNet) || 0;
+    if (listNet <= 0) return '';
+    const iva = 1 + Math.max(0, Number(state.scenario?.ivaRate) || 0);
+    const lines = (summary.materialLines || []).filter((line) => line.listTotal > 0)
+      .map((line) => `${formatNumber(line.quantity, 0, 2)} ${sanitize(renderCalculationUnitLabel(line.material?.calculationUnit))} × ${formatCurrencySmart(line.listPrice)}`).join(' + ');
+    return `
+      <div class="quote-rule-notice" role="note">
+        <div><strong>Precio de lista del servicio:</strong> ${lines} = ${formatCurrency(listNet)} neto (${formatCurrency(Math.round(listNet * iva))} con IVA). Si es un servicio solicitado, úsalo como precio definido.</div>
+        <button type="button" class="btn btn-soft btn-xs" data-action="use-list-price" data-gross="${Math.round(listNet * iva)}">Usar como precio</button>
+      </div>`;
+  }
+
+  // Boleta / factura por línea: parte en la forma de compra habitual del insumo.
+  function renderLinePurchaseDocSelect(line) {
+    if (!line.material) return '';
+    if (line.purchaseDoc === 'congelado') return '<div class="small purchase-doc-frozen" title="OT calculada con la regla antigua: el costo de este insumo queda como se cotizó.">Costo congelado (regla antigua)</div>';
+    if (line.purchaseDoc === 'exento') return '<div class="small">Sin IVA</div>';
+    return `
+      <select class="input-sm purchase-doc-select" data-collection="quote.materials" data-id="${line.id}" data-key="purchaseDoc" title="Boleta: el IVA se suma al costo. Factura: el IVA es crédito fiscal y el costo es el neto.">
+        <option value="boleta" ${line.purchaseDoc === 'boleta' ? 'selected' : ''}>Boleta (+IVA)</option>
+        <option value="factura" ${line.purchaseDoc === 'factura' ? 'selected' : ''}>Factura (neto)</option>
+      </select>`;
+  }
+
   function renderLineScopeSelect(collection, line) {
     return `
       <select class="input-sm" data-collection="${collection}" data-id="${line.id}" data-key="scope" title="Por pieza: se multiplica por las unidades. Por pedido: se cobra una vez.">
@@ -10996,6 +11222,7 @@ Objetivo
               ` : ''}
             </div>
             <div class="small">${sanitize(line.material?.unit || '-')}</div>
+            ${renderLinePurchaseDocSelect(line)}
           </td>
           <td class="usage-cell" data-label="Material usado">
             <input type="number" min="0" step="0.01" data-collection="quote.materials" data-id="${line.id}" data-key="quantity" value="${line.quantity}" />
@@ -11193,6 +11420,7 @@ Objetivo
           <div id="quote-mat-results" class="quote-mat-results">${renderQuoteMaterialResults(state.ui.quoteMatQuery || '')}</div>
           ${frequentMaterials.length ? `<div class="quote-mat-frequent"><span class="small">Frecuentes:</span>${frequentMaterials.map((item) => `<button type="button" class="btn btn-soft btn-xs" data-action="quick-add-material" data-id="${sanitize(item.id)}">+ ${sanitize(item.name)}</button>`).join('')}</div>` : ''}
         </div>
+        ${renderQuotePurchaseNotice(calc.quoteSummary)}
         <div class="table-wrap table-compact quote-work-table">
           <table>
             <thead>
@@ -11350,6 +11578,7 @@ Objetivo
           <div class="small">${sanitize(calc.quoteSummary.selectedStatus?.text || 'Dentro de las metas definidas')}. ${sanitize(calc.quoteSummary.averageSaleSignal?.text || '')}.</div>
           ${calc.quoteSummary.selectedPriceMode === 'custom' ? `<div class="small">Neto real: ${formatCurrency(calc.quoteSummary.customNet || 0)} · IVA: ${formatCurrency(calc.quoteSummary.customIvaAmount || 0)}</div>` : ''}
         </div>
+        ${renderListPriceHint(calc.quoteSummary)}
 
         <div class="inline-actions">
           <button class="btn btn-primary" data-action="save-order-system">${editingOrder ? 'Guardar cambios en el Panel OT' : 'Incorporar al Panel OT'}</button>
@@ -11553,7 +11782,136 @@ Objetivo
     }
   }
 
+  // Forma de compra del insumo (Política de precios v1). Es la habitual: en cada OT se puede cambiar.
+  // ---- Revisión de IVA de los insumos antiguos (Política de precios v1) ----
+  // Cada insumo sin purchaseDoc conserva su costo de siempre hasta que aquí se elige si su valor guardado
+  // es con IVA (lo pagado) o ya es neto, y cómo se compra.
+  function getPendingNetReviewMaterials() {
+    return (state.database.materials || []).filter((item) => window.ERMStorage.isPendingNetReview(item));
+  }
+
+  function renderNetReviewPanel() {
+    const pending = getPendingNetReviewMaterials();
+    if (!pending.length) return '';
+    if (!state.ui.netReviewOpen) {
+      return `
+        <div class="quote-rule-notice is-legacy" role="note">
+          <div><strong>${pending.length} insumo(s) por revisar el IVA.</strong> Mientras no los revises, mantienen el costo de siempre. Revisa si su precio guardado es con IVA o neto, y si los compras con boleta o factura.</div>
+          <button type="button" class="btn btn-primary btn-xs" data-action="open-net-review">Revisar IVA</button>
+        </div>`;
+    }
+    const iva = 1 + Math.max(0, Number(state.scenario?.ivaRate) || 0);
+    const rows = pending.map((item) => {
+      const hint = window.ERMStorage.suggestLegacyNet(item);
+      const stored = Number(item.baseCost) || 0;
+      const netIfGross = hint.noteNet || Math.round(stored / iva);
+      const noteIva = /\b(con|sin)\s+iva\b/i.test(item.notes || '') ? (item.notes || '').split(/\r?\n/).filter((t) => /iva/i.test(t)).join(' · ') : '';
+      return `
+        <tr data-net-review-row="${sanitize(item.id)}">
+          <td data-label="Insumo"><strong>${sanitize(item.name)}</strong><div class="small">${sanitize(item.provider || 'Sin proveedor')}${noteIva ? ` · nota: "${sanitize(noteIva)}"` : ''}</div></td>
+          <td data-label="Valor guardado" class="mono">${formatCurrency(stored)}</td>
+          <td data-label="El valor guardado es">
+            <select class="input-sm" data-net-review-field="valueIs">
+              <option value="conIva" ${hint.valueIs === 'conIva' ? 'selected' : ''}>Con IVA → neto ${formatCurrency(netIfGross)}</option>
+              <option value="neto" ${hint.valueIs === 'neto' ? 'selected' : ''}>Ya es neto → con IVA ${formatCurrency(Math.round(stored * iva))}</option>
+            </select>
+          </td>
+          <td data-label="Se compra con">
+            <select class="input-sm" data-net-review-field="purchaseDoc">
+              <option value="boleta" selected>Boleta</option>
+              <option value="factura">Factura</option>
+              <option value="exento">Sin IVA</option>
+            </select>
+          </td>
+        </tr>`;
+    }).join('');
+    return `
+      <div class="card net-review-card">
+        <div class="section-title">
+          <div>
+            <h3>Revisar IVA de los insumos</h3>
+            <p class="subtitle">Desde ahora el precio de la base es el neto y cada insumo dice si se compra con boleta (el IVA se suma al costo) o con factura (el IVA es crédito). Elige qué es el valor guardado de cada uno. Si la nota trae el neto escrito ("sin IVA = $…"), la propuesta lo usa.</p>
+          </div>
+        </div>
+        <div class="table-wrap table-compact">
+          <table>
+            <thead><tr><th>Insumo</th><th>Valor guardado</th><th>El valor guardado es</th><th>Se compra con</th></tr></thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>
+        <div class="inline-actions">
+          <button type="button" class="btn btn-primary" data-action="apply-net-review">Guardar revisión</button>
+          <button type="button" class="btn btn-soft" data-action="close-net-review">Revisar después</button>
+        </div>
+      </div>`;
+  }
+
+  function applyNetReviewFromPanel() {
+    const ivaRate = state.scenario?.ivaRate;
+    const rows = [...document.querySelectorAll('[data-net-review-row]')];
+    let changed = 0;
+    rows.forEach((row) => {
+      const index = state.database.materials.findIndex((item) => item.id === row.dataset.netReviewRow);
+      if (index < 0) return;
+      const item = state.database.materials[index];
+      const valueIs = row.querySelector('[data-net-review-field="valueIs"]')?.value || 'conIva';
+      const purchaseDoc = row.querySelector('[data-net-review-field="purchaseDoc"]')?.value || 'boleta';
+      const hint = window.ERMStorage.suggestLegacyNet(item);
+      const converted = window.ERMStorage.convertLegacyMaterial(item, valueIs, purchaseDoc, ivaRate, valueIs === 'conIva' ? hint.noteNet : 0);
+      const preview = calculateMaterialPreview(converted);
+      converted.formulaSummary = preview.description;
+      state.database.materials[index] = converted;
+      changed += 1;
+    });
+    window.ERMStorage.refreshCostBasis(state.database);
+    state.ui.netReviewOpen = false;
+    logActivity(`Base de datos: IVA revisado en ${changed} insumo(s)`);
+    stampBaseUpdate('database');
+    render();
+  }
+
+  function purchaseDocLabel(material) {
+    if (window.ERMStorage.isPendingNetReview(material)) return 'IVA por revisar';
+    const doc = window.ERMCalc.materialCosts(material, state.scenario?.ivaRate).purchaseDoc;
+    return { boleta: 'Boleta', factura: 'Factura', exento: 'Sin IVA' }[doc] || 'Boleta';
+  }
+
+  function renderPurchaseDocField(form) {
+    const doc = window.ERMCalc.normalizePurchaseDoc(form.purchaseDoc, form.calculationUnit === 'min' ? 'exento' : 'boleta');
+    const options = [['boleta', 'Boleta (IVA es costo)'], ['factura', 'Factura (IVA es crédito)'], ['exento', 'Sin IVA (servicio / láser propio)']];
+    return `
+      <label class="label-with-tip"><span>Se compra con</span>${renderInfoTip('Cómo compras habitualmente este insumo. Con boleta el IVA no se recupera y se suma al costo; con factura el IVA es crédito fiscal y el costo es el neto. En cada OT puedes cambiarlo línea por línea.')}</label>
+      <select id="material-purchase-doc" data-db-draft="purchaseDoc">
+        ${options.map(([value, label]) => `<option value="${value}" ${doc === value ? 'selected' : ''}>${label}</option>`).join('')}
+      </select>`;
+  }
+
+  function renderListPriceField(form) {
+    return `
+      <label class="label-with-tip"><span>Precio de lista neto $</span>${renderInfoTip('Opcional. Precio de VENTA por unidad cuando el insumo se vende como servicio (ej. láser solicitado a $350/min). No es costo: el presupuestador lo muestra como referencia de precio.')}</label>
+      <input id="material-list-price" type="text" inputmode="numeric" data-format="clp" data-db-draft="listPrice" value="${formatNumber(form.listPrice || 0)}" placeholder="Opcional" />`;
+  }
+
   function calculateMaterialPreview(form) {
+    const preview = calculateMaterialPreviewBase(form);
+    // El formulario siempre está en neto: se fija la forma de compra para no caer en el formato antiguo.
+    const purchaseDoc = window.ERMCalc.normalizePurchaseDoc(form.purchaseDoc, form.calculationUnit === 'min' ? 'exento' : 'boleta');
+    const costs = window.ERMCalc.materialCosts({ ...form, purchaseDoc }, state.scenario?.ivaRate);
+    const docText = {
+      boleta: 'Se compra con boleta: el costo incluye el IVA (no se recupera).',
+      factura: 'Se compra con factura: el costo es el neto (el IVA es crédito fiscal).',
+      exento: 'Sin IVA (servicio o láser propio): el costo es el valor ingresado.'
+    }[costs.purchaseDoc];
+    return {
+      ...preview,
+      purchaseDoc: costs.purchaseDoc,
+      unitCostNet: costs.unitCostNet,
+      unitCost: costs.unitCost,
+      description: `${preview.description} ${docText}`
+    };
+  }
+
+  function calculateMaterialPreviewBase(form) {
     const baseCost = Number(form.baseCost) || 0;
 
     if (form.calculationUnit === 'cm2') {
@@ -11650,7 +12008,10 @@ Objetivo
       name: base.name,
       calculationUnit: base.calculationUnit,
       baseCost: base.baseCost,
+      purchaseDoc: preview.purchaseDoc,
+      unitCostNet: Number(preview.unitCostNet) || 0,
       unitCost: Number(preview.unitCost) || 0,
+      listPrice: Math.max(0, Number(base.listPrice) || 0),
       unit: preview.referenceUnit,
       notes: base.notes,
       provider: base.provider || '',
@@ -11960,6 +12321,19 @@ Objetivo
     return issues;
   }
 
+  // Advertencias del Panel OT: lo que falta en una OT (cobro, boleta o factura, registro en Finanzas, cliente).
+  // Incluye los datos incompletos de getOrderDataIssues. Los prototipos no llevan advertencias.
+  function getOrderWarnings(order) {
+    if (!order || isPrototypeOrder(order)) return [];
+    const warnings = [...getOrderDataIssues(order)];
+    const pay = getOrderPaymentStatus(order);
+    const delivered = isDeliveryCompleted(order.deliveryState || order.quote?.deliveryState) || String(order.status || '').startsWith('Entregado');
+    const hasInvoice = Boolean(getPrimaryAttachment(order, legacyOrderInvoiceAttachment));
+    if (pay.kind === 'pending' && pay.pending > 1) warnings.push(`Falta cobrar ${formatCurrency(pay.pending)}`);
+    if (!delivered && !hasInvoice && pay.cobrado > 0) warnings.push('Tiene cobros sin boleta o factura adjunta');
+    return warnings;
+  }
+
   // Ventas netas del año (Finanzas, categoría Ventas, sin IVA). No suman los cobros ligados a prototipos.
   function getYearSalesProgress(year = new Date().getFullYear()) {
     const rate = Number(state.scenario?.ivaRate) > 0 ? Number(state.scenario.ivaRate) : 0.19;
@@ -12018,16 +12392,21 @@ Objetivo
       visibleOrders.sort((a, b) => String(a.orderNumber || '').localeCompare(String(b.orderNumber || ''), undefined, { numeric: true, sensitivity: 'base' }));
     }
     // El círculo seleccionado sube su grupo al inicio de la lista (sort estable: conserva el orden previo).
-    const groupPriority = ORDER_GROUPS.some((group) => group.key === state.ui.orderGroupPriority) ? state.ui.orderGroupPriority : '';
+    const priorityGroups = [...ORDER_GROUPS, ORDER_WARNINGS_GROUP];
+    const groupPriority = priorityGroups.some((group) => group.key === state.ui.orderGroupPriority) ? state.ui.orderGroupPriority : '';
+    const inPriorityGroup = (order) => (groupPriority === 'warnings' ? getOrderWarnings(order).length > 0 : getOrderGroup(order) === groupPriority);
     if (groupPriority) {
-      visibleOrders.sort((a, b) => Number(getOrderGroup(b) === groupPriority) - Number(getOrderGroup(a) === groupPriority));
+      visibleOrders.sort((a, b) => Number(inPriorityGroup(b)) - Number(inPriorityGroup(a)));
     }
-    const groupCounts = { pending: 0, delivered: 0, prototype: 0 };
-    (state.orders || []).forEach((order) => { groupCounts[getOrderGroup(order)] += 1; });
-    const groupCircles = ORDER_GROUPS.map((group) => `
-      <button type="button" class="ot-group-btn ${group.className} ${groupPriority === group.key ? 'active' : ''}" data-action="set-order-group-priority" data-group="${group.key}" aria-pressed="${groupPriority === group.key}" title="Mostrar primero: ${group.label}">
-        <span class="ot-group-circle">${groupCounts[group.key]}</span>
-        <span class="ot-group-label">${group.label}</span>
+    const groupCounts = { pending: 0, delivered: 0, prototype: 0, warnings: 0 };
+    (state.orders || []).forEach((order) => {
+      groupCounts[getOrderGroup(order)] += 1;
+      if (getOrderWarnings(order).length) groupCounts.warnings += 1;
+    });
+    const groupCircles = priorityGroups.map((group) => `
+      <button type="button" class="ot-chip ${group.className} ${groupPriority === group.key ? 'active' : ''}" data-action="set-order-group-priority" data-group="${group.key}" aria-pressed="${groupPriority === group.key}" title="Mostrar primero: ${group.label}">
+        <span class="ot-chip-label">${group.label}</span>
+        <span class="ot-chip-count">${groupCounts[group.key]}</span>
       </button>
     `).join('');
 
@@ -12069,26 +12448,23 @@ Objetivo
       const hasInvoice = Boolean(getPrimaryAttachment(order, legacyOrderInvoiceAttachment));
       const productImage = getOrderProductImage(order);
       const inTabs = isInTabs(order);
-      const issues = getOrderDataIssues(order);
+      const issues = getOrderWarnings(order);
       return `
-        <div class="ot-card ${meta.className} ${delivered ? 'is-delivered' : ''} ${idsEqual(selectedOrder?.id, order.id) ? 'selected' : ''}" role="button" tabindex="0" data-action="open-order-card" data-id="${order.id}">
-          ${productImage ? `<span class="ot-card-thumb">${renderOrderProductMedia(productImage, 'ot-card-thumb-media')}</span>` : ''}
-          <div class="ot-card-body">
-            <div class="ot-card-number-row">
-              <button type="button" class="ot-tab-add-btn ${inTabs ? 'is-added' : ''}" data-action="add-order-tab" data-id="${order.id}" title="${inTabs ? 'Ya está en pestañas' : 'Agregar a pestañas'}" aria-label="${inTabs ? 'Ya está en pestañas' : 'Agregar a pestañas'}">${inTabs ? '✓' : '+'}</button>
-              <span class="small ot-card-number">${sanitize(order.orderNumber || '-')}</span>
-              ${issues.length ? `<span class="ot-card-warn" role="img" aria-label="Datos incompletos: ${sanitize(issues.join('. '))}" title="Datos incompletos:&#10;• ${issues.map((text) => sanitize(text)).join('&#10;• ')}">⚠</span>` : ''}
-            </div>
-            <strong class="ot-card-title" title="${sanitize(titleRaw)}">${sanitize(titleRaw)}</strong>
-            <div class="ot-card-tags">
-              ${renderOrderStatusPill(order.status || 'Prospecto')}
-              ${isPrototypeOrder(order) ? '' : renderDeliveryPill(deliveryState)}
-              <span class="ot-invoice-flag ${hasInvoice ? 'is-ok' : 'is-missing'}" title="${hasInvoice ? 'Boleta/factura adjunta' : 'Sin boleta/factura'}">${hasInvoice ? '✓ Boleta' : '⚠ Sin boleta'}</span>
-            </div>
+        <div class="ot-card ot-tile ${meta.className} ${delivered ? 'is-delivered' : ''} ${idsEqual(selectedOrder?.id, order.id) ? 'selected' : ''}" role="button" tabindex="0" data-action="open-order-card" data-id="${order.id}" title="${sanitize(titleRaw)}">
+          <div class="ot-tile-top">
+            <button type="button" class="ot-tab-add-btn ${inTabs ? 'is-added' : ''}" data-action="add-order-tab" data-id="${order.id}" title="${inTabs ? 'Ya está en pestañas' : 'Agregar a pestañas'}" aria-label="${inTabs ? 'Ya está en pestañas' : 'Agregar a pestañas'}">${inTabs ? '✓' : '+'}</button>
+            <span class="ot-card-number">${sanitize(order.orderNumber || '-')}</span>
+            ${issues.length ? `<span class="ot-card-warn" role="img" aria-label="Advertencias: ${sanitize(issues.join('. '))}" title="Advertencias:&#10;• ${issues.map((text) => sanitize(text)).join('&#10;• ')}">⚠</span>` : ''}
+            ${productImage ? `<span class="ot-card-thumb">${renderOrderProductMedia(productImage, 'ot-card-thumb-media')}</span>` : ''}
           </div>
-          <div class="ot-card-bottom-row">
-            <div class="ot-card-price">${formatCurrency(order.quoteSummary?.effectiveGross || order.priceGross || 0)}</div>
-            <div class="ot-card-achievement ${marginAchievement.tone}" title="${sanitize(marginAchievement.label)}">${marginAchievement.iconMarkup}</div>
+          <strong class="ot-card-title">${sanitize(titleRaw)}</strong>
+          <div class="ot-tile-status">
+            <span class="ot-tile-state"><span class="order-status-dot ${meta.dot}"></span>${sanitize(meta.label || order.status || 'Prospecto')}</span>
+            ${isPrototypeOrder(order) ? '' : `<span class="ot-tile-doc ${hasInvoice ? 'is-ok' : 'is-missing'}" title="${hasInvoice ? 'Boleta/factura adjunta' : 'Sin boleta/factura'}">${hasInvoice ? '✓ Boleta' : 'Sin boleta'}</span>`}
+          </div>
+          <div class="ot-tile-bottom">
+            <span class="ot-card-price">${formatCurrency(order.quoteSummary?.effectiveGross || order.priceGross || 0)}</span>
+            <span class="ot-card-achievement ${marginAchievement.tone}" title="${sanitize(marginAchievement.label)}">${marginAchievement.iconMarkup}</span>
           </div>
         </div>
       `;
@@ -12186,7 +12562,7 @@ Objetivo
 
       const resumenTab = `
         <div class="ot-kpis">
-          <div class="ot-kpi"><span>Precio con IVA</span><strong>${formatCurrency(gross)}</strong><small>Neto ${formatCurrency(net)} · IVA ${formatCurrency(gross - net)}</small></div>
+          <div class="ot-kpi"><span>Precio con IVA ${renderOrderRuleTip(selectedOrder)}</span><strong>${formatCurrency(gross)}</strong><small>Neto ${formatCurrency(net)} · IVA ${formatCurrency(gross - net)}</small></div>
           <div class="ot-kpi"><span>Costo total</span><strong>${formatCurrency(totalCost)}</strong><small>Sueldo ${formatCurrency(sum.laborTotal || 0)}</small></div>
           <div class="ot-kpi ot-kpi-${selectedAchievement.tone}"><span>Margen real</span><strong>${formatPercent(sum.realMargin || 0)}</strong><small class="${contribution > 0 ? 'is-good' : 'is-bad'}">Utilidad ${formatCurrency(contribution)}</small></div>
         </div>
@@ -12304,21 +12680,25 @@ Objetivo
         </div>
         ${renderSalesGoalBar()}
 
-        <div class="ot-layout">
-          <div class="ot-list-panel">
-            <div class="ot-group-row">${groupCircles}</div>
-            <div class="ot-list-controls">
-              <button type="button" class="btn btn-soft picker-trigger-btn" data-action="open-order-filter-picker" title="Filtrar OT por categoría">
-                <span class="picker-trigger-label">Categoría: ${sanitize(currentFilterLabel)}</span>
-                <span class="picker-trigger-caret" aria-hidden="true">▾</span>
-              </button>
-              <button class="btn btn-soft ${sortByOrderNumber ? 'active' : ''}" data-action="toggle-order-sort" title="Ordenar las OT por número de orden">${sortByOrderNumber ? '✓ ' : ''}Ordenar por N° OT</button>
-            </div>
-            <div class="ot-grid">
-              ${cards || '<div class="empty-state">Todavía no hay órdenes guardadas en el sistema. Importa la Base OT desde la Central de Descargas.</div>'}
-            </div>
+        <div class="ot-toolbar">
+          <div class="ot-chips" role="group" aria-label="Mostrar primero">${groupCircles}</div>
+          <div class="ot-toolbar-actions">
+            <button type="button" class="btn btn-soft picker-trigger-btn" data-action="open-order-filter-picker" title="Filtrar OT por categoría">
+              <span class="picker-trigger-label">Categoría: ${sanitize(currentFilterLabel)}</span>
+              <span class="picker-trigger-caret" aria-hidden="true">▾</span>
+            </button>
+            <button class="btn btn-soft ${sortByOrderNumber ? 'active' : ''}" data-action="toggle-order-sort" title="Ordenar las OT por número de orden">${sortByOrderNumber ? '✓ ' : ''}Ordenar por N° OT</button>
           </div>
-          ${selectedOrder || cards ? `<aside class="ot-preview">${orderTabsBar}${renderPreview()}</aside>` : ''}
+        </div>
+
+        <div class="ot-layout ${state.ui.orderFichaOpen ? 'is-ficha-open' : ''}">
+          <div class="ot-grid">
+            ${cards || '<div class="empty-state">Todavía no hay órdenes guardadas en el sistema. Importa la Base OT desde la Central de Descargas.</div>'}
+          </div>
+          ${selectedOrder || cards ? `<aside class="ot-preview" aria-label="Ficha de la OT">
+            <button type="button" class="btn btn-soft ot-preview-back" data-action="close-order-ficha">‹ Volver a las OT</button>
+            ${orderTabsBar}${renderPreview()}
+          </aside>` : ''}
         </div>
       </div>
     `;
@@ -12556,22 +12936,14 @@ Objetivo
     `;
   }
 
-  // Escritorio: el Panel OT ocupa exactamente el alto visible; solo la lista de OT hace scroll.
+  // Escritorio: la página hace scroll (no las columnas). La ficha queda pegada arriba mientras se
+  // recorre el mosaico; si es más alta que la ventana, su "top" negativo deja ver también su final.
   function fitOrdersLayout() {
-    const layout = refs.mainPanel?.querySelector('.ot-layout');
-    if (!layout) return;
-    if (isMobileViewport()) { layout.style.height = ''; return; }
-    // También debe caber lo que queda bajo el panel: padding de la ficha, pie de página y los
-    // widgets flotantes, que index.html ancla bajo el pie cuando este entra en pantalla.
-    const shell = document.querySelector('.app-shell');
-    const footer = document.querySelector('.app-footer');
-    if (!shell) return;
-    const current = layout.getBoundingClientRect().height;
-    let contentBottom = shell.getBoundingClientRect().bottom;
-    const dockHeight = Math.max(0, ...[document.getElementById('activity-log-widget'), document.querySelector('.sync-badge')]
-      .filter(Boolean).map((el) => el.offsetHeight));
-    if (footer && dockHeight) contentBottom = Math.max(contentBottom, footer.getBoundingClientRect().bottom + 12 + dockHeight);
-    layout.style.height = `${Math.max(320, current + window.innerHeight - contentBottom - window.scrollY)}px`;
+    const ficha = refs.mainPanel?.querySelector('.ot-preview');
+    if (!ficha) return;
+    if (isMobileViewport()) { ficha.style.top = ''; return; }
+    const gap = 16;
+    ficha.style.top = `${Math.min(gap, window.innerHeight - ficha.offsetHeight - gap)}px`;
   }
   window.addEventListener('resize', () => {
     if (state.currentView === 'orders') fitOrdersLayout();
@@ -12581,14 +12953,110 @@ Objetivo
     return typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(max-width: 780px)').matches;
   }
 
-  function renderDocs(calc) {
+  // ---- Ayuda técnica: la Política de precios explicada, con una calculadora paso a paso ----
+  // Solo informativa: usa las mismas funciones de ERMCalc que el presupuestador, con los valores del Escenario.
+  let docsCalcValues = null;
+
+  function getDocsPolicyParams() {
+    const scenario = state.scenario || {};
+    const calcLib = window.ERMCalc;
+    const iva = Number(scenario.ivaRate) || 0.19;
+    const cif = calcLib.cifRateBreakdown(scenario);
+    const lasers = (state.database?.materials || []).filter((item) => item.calculationUnit === 'min' && Number(item.listPrice) > 0);
+    return {
+      iva,
+      efficiency: Math.max(0.1, Math.min(1, Number(scenario.efficiency) || 0.85)),
+      productiveHours: calcLib.productiveHours(scenario),
+      rawHours: (scenario.employees || []).reduce((acc, employee) => acc + (Number(employee.hoursPerMonth) || 0), 0) * Math.max(1, Number(scenario.periodMonths) || 1),
+      laborRate: calcLib.averageLaborRate(scenario),
+      cifCash: cif.cash,
+      cifOpportunity: cif.opportunity,
+      cifFull: calcLib.roundMoney(cif.cash + cif.opportunity),
+      minMargin: Number(scenario.minimumMargin) || 0.25,
+      idealMargin: Number(scenario.idealMargin) || 0.5,
+      laserCost: Number(lasers[0]?.baseCost) || 150,
+      laserList: Number(lasers[0]?.listPrice) || 350,
+      pendingIva: getPendingNetReviewMaterials().length
+    };
+  }
+
+  function getDocsCalcValues(params) {
+    if (!docsCalcValues) {
+      docsCalcValues = { material: 10000, doc: 'boleta', hours: 2, logistics: 0, margin: Math.round(params.minMargin * 100) };
+    }
+    return docsCalcValues;
+  }
+
+  function readDocsCalcInputs() {
+    const read = (key) => document.querySelector(`[data-docs-calc="${key}"]`)?.value ?? '';
+    const decimal = (value) => Math.max(0, Number(String(value).replace(',', '.')) || 0);
+    docsCalcValues = {
+      material: Math.max(0, parseClpNumber(read('material')) || 0),
+      doc: read('doc') === 'factura' ? 'factura' : 'boleta',
+      hours: decimal(read('hours')),
+      logistics: Math.max(0, parseClpNumber(read('logistics')) || 0),
+      margin: Math.min(90, decimal(read('margin')))
+    };
+  }
+
+  function renderDocsCalcSteps(params, values) {
+    const calcLib = window.ERMCalc;
+    const ivaPct = Math.round(params.iva * 100);
+    const factor = calcLib.purchaseIvaFactor(values.doc, params.iva);
+    const material = calcLib.roundMoney(values.material * factor);
+    const labor = calcLib.roundMoney(values.hours * params.laborRate);
+    const cif = calcLib.roundMoney(values.hours * params.cifFull);
+    const totalCost = calcLib.roundMoney(material + labor + cif + values.logistics);
+    const margin = values.margin / 100;
+    const net = calcLib.targetPrice(totalCost, margin);
+    const ivaSale = calcLib.roundMoney(net * params.iva);
+    const gross = calcLib.roundMoney(net + ivaSale);
+    const contribution = calcLib.roundMoney(net - totalCost);
+    const realMargin = net > 0 ? contribution / net : 0;
+    const boletaIva = calcLib.roundMoney(material - values.material);
+    const netIfFactura = calcLib.targetPrice(totalCost - boletaIva, margin);
+    const hoursText = String(values.hours).replace('.', ',');
+    const step = (n, title, formula, value, note, cls = '') => `
+      <li class="pp-step ${cls}">
+        <span class="pp-step-n">${n}</span>
+        <div class="pp-step-body">
+          <strong>${title}</strong>
+          <span class="pp-step-formula">${formula}</span>
+          ${note ? `<span class="pp-step-note">${note}</span>` : ''}
+        </div>
+        <span class="pp-step-value">${value}</span>
+      </li>`;
+    return `
+      ${step(1, 'Materiales', `${formatCurrency(values.material)} neto × ${values.doc === 'boleta' ? `1,${ivaPct}` : '1'}`, formatCurrency(material),
+        values.doc === 'boleta' ? 'Con boleta el IVA no se recupera: es parte del costo.' : 'Con factura el IVA vuelve como crédito fiscal: el costo es el neto.')}
+      ${step(2, 'Mano de obra', `${hoursText} h × ${formatCurrency(params.laborRate)}/h`, formatCurrency(labor), 'Valor hora real: sueldos ÷ horas productivas.')}
+      ${step(3, 'CIF (costos del taller)', `${hoursText} h × ${formatCurrency(params.cifFull)}/h`, formatCurrency(cif), 'Luz, arriendo, contribuciones y demás, repartidos por hora.')}
+      ${step(4, 'Logística', 'se suma una sola vez', formatCurrency(values.logistics), 'Va antes del margen y nunca se multiplica por las piezas.')}
+      ${step('=', 'Costo total', 'materiales + mano de obra + CIF + logística', formatCurrency(totalCost), '', 'is-total')}
+      ${step(5, 'Precio neto', `${formatCurrency(totalCost)} ÷ (1 − ${values.margin}%)`, formatCurrency(net), 'Lo que gana la empresa. El margen siempre se mide aquí.')}
+      ${step(6, `IVA de la venta (${ivaPct}%)`, `${formatCurrency(net)} × ${ivaPct}%`, formatCurrency(ivaSale), 'No es tuyo: se le entrega al SII en el F29.')}
+      ${step('$', 'Precio con IVA', 'lo que paga el cliente', formatCurrency(gross), '', 'is-final')}
+      <li class="pp-check">
+        <span>Contribución <strong>${formatCurrency(contribution)}</strong></span>
+        <span>Margen real <strong class="${realMargin + 1e-6 >= params.minMargin ? 'is-ok' : 'is-low'}">${formatPercent(realMargin)}</strong></span>
+        <span class="pp-check-note">${realMargin + 1e-6 >= params.minMargin ? `Sobre el mínimo de ${formatPercent(params.minMargin)}.` : `Bajo el mínimo de ${formatPercent(params.minMargin)}: no conviene.`}</span>
+      </li>
+      ${values.doc === 'boleta' && boletaIva > 0 ? `<li class="pp-tip">Si compras ese material con factura, el costo baja ${formatCurrency(boletaIva)} y el precio neto podría bajar a ${formatCurrency(netIfFactura)} con el mismo margen. Ese es tu piso para negociar.</li>` : ''}
+    `;
+  }
+
+  function updateDocsCalculator() {
+    const list = document.getElementById('docs-calc-steps');
+    if (!list) return;
+    readDocsCalcInputs();
+    list.innerHTML = renderDocsCalcSteps(getDocsPolicyParams(), docsCalcValues);
+  }
+
+  function renderDocsFormulas(calc) {
     const projection = calc.scenarioSummary.projection || {};
     return `
-      <div class="card docs-card">
-        ${renderPageHead('settings', 'Ayuda técnica', 'Guía compacta de módulos, criterios y fórmulas de la app.')}
-
         <div class="docs-compact">
-          <details class="docs-section">
+          <details class="docs-section" open>
             <summary>1. Escenario</summary>
             <p>Define costos, sueldos, eficiencia e IVA para obtener las tasas base del sistema.</p>
             <div class="docs-formula formula-book"><span class="formula-label">Horas productivas</span><div class="formula-eq"><span class="formula-symbol">=</span><span>horas disponibles × eficiencia</span></div></div>
@@ -12607,8 +13075,8 @@ Objetivo
           <details class="docs-section">
             <summary>3. Insumos y mano de obra</summary>
             <p>Calcula el costo directo de cada línea de la OT.</p>
-            <div class="docs-formula formula-book"><span class="formula-label">Total insumo</span><div class="formula-eq"><span class="formula-symbol">=</span><span>cantidad × costo unitario + merma</span></div></div>
-            <div class="docs-formula formula-book"><span class="formula-label">Merma</span><div class="formula-eq"><span class="formula-symbol">=</span><span>total base × % de merma</span></div></div>
+            <div class="docs-formula formula-book"><span class="formula-label">Costo efectivo del insumo</span><div class="formula-eq"><span class="formula-symbol">=</span><span>neto × 1,19 si es boleta · neto si es factura o exento</span></div></div>
+            <div class="docs-formula formula-book"><span class="formula-label">Total insumo</span><div class="formula-eq"><span class="formula-symbol">=</span><span>cantidad × costo efectivo + merma</span></div></div>
             <div class="docs-formula formula-book"><span class="formula-label">Valor hora real</span><div class="formula-eq"><span class="formula-symbol">=</span><span class="formula-frac"><span class="formula-top">valor hora nominal</span><span class="formula-bottom">eficiencia</span></span></div></div>
           </details>
 
@@ -12628,7 +13096,143 @@ Objetivo
             <div class="docs-formula formula-book"><span class="formula-label">Precio con IVA</span><div class="formula-eq"><span class="formula-symbol">=</span><span>precio neto × (1 + IVA)</span></div></div>
             <div class="small">Referencia actual: equilibrio ${formatCurrency(projection.breakEvenSales || 0)} · mínimo ${formatCurrency(projection.minimumSalesRequired || 0)} · ideal ${formatCurrency(projection.idealSalesRequired || 0)}</div>
           </details>
-        </div>
+        </div>`;
+  }
+
+  function renderDocsPolicy() {
+    const p = getDocsPolicyParams();
+    const values = getDocsCalcValues(p);
+    const ivaPct = Math.round(p.iva * 100);
+    const example = 10000;
+    const exampleIva = Math.round(example * p.iva);
+    const effPct = Math.round(p.efficiency * 100);
+    const cashShare = p.cifFull > 0 ? Math.round((p.cifCash / p.cifFull) * 100) : 50;
+    return `
+        <section class="pp-hero">
+          <span class="pp-kicker">La regla en una frase</span>
+          <p class="pp-golden">Todo se calcula en <strong>neto</strong>. El IVA de la venta se suma al final, y el IVA de una compra solo es costo si la compraste con <strong>boleta</strong>.</p>
+          <div class="pp-facts">
+            <span class="pp-fact"><em>Base de insumos</em>${p.pendingIva ? `<strong class="is-low">${p.pendingIva} por revisar</strong>` : '<strong class="is-ok">en neto ✓</strong>'}</span>
+            <span class="pp-fact"><em>Margen mínimo</em><strong>${formatPercent(p.minMargin)}</strong></span>
+            <span class="pp-fact"><em>Margen ideal</em><strong>${formatPercent(p.idealMargin)}</strong></span>
+            <span class="pp-fact"><em>CIF por hora</em><strong>${formatCurrency(p.cifFull)}</strong></span>
+            <span class="pp-fact"><em>Láser</em><strong>${formatCurrency(p.laserCost)}/min</strong></span>
+          </div>
+        </section>
+
+        <section class="pp-block">
+          <h3 class="pp-title"><span>1</span> El camino del precio</h3>
+          <p class="pp-lead">Así arma el presupuestador cada precio. Cambia los números y mira cómo se mueve cada paso. La mano de obra y el CIF salen de tu Escenario.</p>
+          <div class="pp-calc">
+            <div class="pp-calc-inputs">
+              <label>Material (neto)<input data-docs-calc="material" inputmode="numeric" value="${values.material}" /></label>
+              <label>Se compra con<select data-docs-calc="doc"><option value="boleta" ${values.doc === 'boleta' ? 'selected' : ''}>Boleta (+IVA)</option><option value="factura" ${values.doc === 'factura' ? 'selected' : ''}>Factura (neto)</option></select></label>
+              <label>Horas de taller<input data-docs-calc="hours" inputmode="decimal" value="${String(values.hours).replace('.', ',')}" /></label>
+              <label>Logística<input data-docs-calc="logistics" inputmode="numeric" value="${values.logistics}" /></label>
+              <label>Margen objetivo (%)<input data-docs-calc="margin" inputmode="decimal" value="${values.margin}" /></label>
+              <p class="pp-calc-note">Es solo un ejemplo: no guarda nada ni crea una OT.</p>
+            </div>
+            <ol class="pp-steps" id="docs-calc-steps">${renderDocsCalcSteps(p, values)}</ol>
+          </div>
+        </section>
+
+        <section class="pp-block">
+          <h3 class="pp-title"><span>2</span> ¿Boleta o factura?</h3>
+          <p class="pp-lead">En la base, cada insumo guarda su precio <strong>neto</strong> y cómo lo compras habitualmente. En cada OT puedes cambiarlo línea por línea.</p>
+          <div class="pp-compare">
+            <div class="pp-card">
+              <span class="pp-card-tag">Boleta</span>
+              <div class="pp-row"><span>Pagas</span><strong>${formatCurrency(example + exampleIva)}</strong></div>
+              <div class="pp-row"><span>Recuperas</span><strong>$0</strong></div>
+              <div class="pp-row is-sum"><span>Tu costo</span><strong>${formatCurrency(example + exampleIva)}</strong></div>
+              <p>El IVA queda dentro del costo. La OT lo carga completo.</p>
+            </div>
+            <div class="pp-card is-good">
+              <span class="pp-card-tag">Factura</span>
+              <div class="pp-row"><span>Pagas</span><strong>${formatCurrency(example + exampleIva)}</strong></div>
+              <div class="pp-row"><span>Recuperas (crédito F29)</span><strong>${formatCurrency(exampleIva)}</strong></div>
+              <div class="pp-row is-sum"><span>Tu costo</span><strong>${formatCurrency(example)}</strong></div>
+              <p>El ${ivaPct}% vuelve como crédito fiscal y es gasto deducible. Conviene siempre que el comercio la entregue.</p>
+            </div>
+          </div>
+          <p class="pp-note">El crédito solo cuenta cuando registras el egreso en <strong>Finanzas</strong> con la casilla de IVA. El remanente del galpón no cambia los precios: se sigue cotizando en neto.</p>
+        </section>
+
+        <section class="pp-block">
+          <h3 class="pp-title"><span>3</span> Horas productivas y CIF</h3>
+          <p class="pp-lead">Nadie trabaja el 100% del tiempo cobrando. Por eso los costos del taller se reparten solo entre las horas que de verdad producen.</p>
+          <div class="pp-hours">
+            <div class="pp-hours-bar" aria-hidden="true"><span style="width:${effPct}%">${Math.round(p.productiveHours)} h productivas</span><em>${Math.round(p.rawHours - p.productiveHours)} h</em></div>
+            <p class="pp-hours-caption">${Math.round(p.rawHours)} h del período × ${effPct}% de eficiencia = <strong>${Math.round(p.productiveHours)} h</strong> para repartir los costos fijos.</p>
+          </div>
+          <div class="pp-cif">
+            <div class="pp-cif-bar" aria-hidden="true"><span class="is-cash" style="width:${cashShare}%"></span><span class="is-opp" style="width:${100 - cashShare}%"></span></div>
+            <div class="pp-cif-legend">
+              <span><i class="is-cash"></i>Efectivo (lo que pagas cada mes) <strong>${formatCurrency(p.cifCash)}/h</strong></span>
+              <span><i class="is-opp"></i>Oportunidad (provisiones, como las contribuciones del galpón) <strong>${formatCurrency(p.cifOpportunity)}/h</strong></span>
+              <span class="is-sum">CIF completo, el que se cobra <strong>${formatCurrency(p.cifFull)}/h</strong></span>
+            </div>
+          </div>
+          <p class="pp-note">Cada hora de taller carga los costos fijos completos; no se reparten entre líneas. Las horas de un proveedor externo no cargan CIF.</p>
+        </section>
+
+        <section class="pp-block">
+          <h3 class="pp-title"><span>4</span> Láser: costo y precio de lista</h3>
+          <div class="pp-compare">
+            <div class="pp-card">
+              <span class="pp-card-tag">Costo interno</span>
+              <div class="pp-big">${formatCurrency(p.laserCost)}<small>/min</small></div>
+              <p>Máquina, luz, mantención e insumos, sin ganancia. Entra como costo en toda OT que use el láser.</p>
+            </div>
+            <div class="pp-card">
+              <span class="pp-card-tag">Precio de lista</span>
+              <div class="pp-big">${formatCurrency(p.laserList)}<small>/min</small></div>
+              <p>Lo que se cobra por un corte pedido (maquetas, piezas sueltas). Es precio de venta: el presupuestador lo sugiere, nunca lo carga como costo.</p>
+            </div>
+          </div>
+        </section>
+
+        <section class="pp-block">
+          <h3 class="pp-title"><span>5</span> Cada línea de producto</h3>
+          <p class="pp-lead">Las fórmulas son las mismas en todas las apps. Solo cambian estos parámetros.</p>
+          <div class="table-wrap table-compact">
+            <table class="pp-table">
+              <thead><tr><th>Línea</th><th>Mano de obra</th><th>CIF</th><th>Margen</th><th>Redondeo</th></tr></thead>
+              <tbody>
+                <tr><td><strong>Personalizados</strong><span>AndiApp</span></td><td>eficiencia del Escenario o de la OT</td><td>completo</td><td>mín. ${formatPercent(p.minMargin)} · ideal ${formatPercent(p.idealMargin)}</td><td>precio manual</td></tr>
+                <tr><td><strong>Stands QR</strong><span>QRApp</span></td><td>la de la app</td><td>completo</td><td>Escenario</td><td>—</td></tr>
+                <tr><td><strong>Muebles y espejo</strong><span>Paramapp</span></td><td>eficiencia 0,85</td><td>completo</td><td>25%</td><td>hacia arriba a $1.000</td></tr>
+                <tr><td><strong>Letras de acrílico</strong><span>LetrasAcrilico</span></td><td>eficiencia 0,95</td><td>solo efectivo</td><td>30% de lista · piso 20%</td><td>hacia arriba a $100</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <p class="pp-note">Letras puede bajar del 25% porque es volumen y proceso estándar, pero nunca de 20%, y debe dejar por hora al menos lo mismo que un trabajo personalizado.</p>
+        </section>
+
+        <section class="pp-block">
+          <h3 class="pp-title"><span>6</span> Errores que no hay que cometer</h3>
+          <ul class="pp-donts">
+            <li><b>✕</b><span>Dividir un precio por 1,19 "para sacarle el IVA". La base ya está en neto; el presupuestador hace el resto.</span></li>
+            <li><b>✕</b><span>Medir el margen sobre el precio con IVA. Siempre sobre el neto.</span></li>
+            <li><b>✕</b><span>Cargar los ${formatCurrency(p.laserList)}/min del láser como costo: cobrarías margen dos veces.</span></li>
+            <li><b>✕</b><span>Multiplicar la logística por la cantidad de piezas. Se suma una vez por pedido.</span></li>
+            <li><b>✕</b><span>Contar el IVA de una compra con factura como costo. Es crédito fiscal.</span></li>
+          </ul>
+        </section>
+
+        <section class="pp-block">
+          <h3 class="pp-title"><span>7</span> OT antiguas</h3>
+          <p class="pp-lead">Las OT cotizadas antes de esta política <strong>no cambian solas</strong>. Al abrirlas, sus insumos quedan con el costo con que se cotizaron. En la ficha, el ícono ⓘ junto al precio muestra cuánto daría la regla nueva; si quieres aplicarla, usa "Recalcular con la regla nueva" en esa OT, y siempre puedes volver al cálculo original.</p>
+        </section>`;
+  }
+
+  function renderDocs(calc) {
+    const tab = state.ui.docsTab === 'formulas' ? 'formulas' : 'policy';
+    return `
+      <div class="card docs-card">
+        ${renderPageHead('settings', 'Ayuda técnica', tab === 'policy' ? 'Política de precios de Andiworks: cómo se calcula cada precio y por qué.' : 'Guía compacta de las fórmulas de la app.')}
+        ${renderPageTabs([['policy', 'Política de precios'], ['formulas', 'Fórmulas de la app']], tab, 'set-docs-tab', 'Secciones de ayuda')}
+        ${tab === 'policy' ? renderDocsPolicy() : renderDocsFormulas(calc)}
       </div>
     `;
   }
@@ -15144,6 +15748,8 @@ Objetivo
       name: pick('name', ''),
       calculationUnit: pick('calculationUnit', 'cm2'),
       baseCost: pick('baseCost', 0),
+      purchaseDoc: pick('purchaseDoc', ''),
+      listPrice: pick('listPrice', 0),
       notes: pick('notes', ''),
       provider: pick('provider', '') || PROVIDER_PRIVATE,
       supplierAddress: pick('supplierAddress', ''),
@@ -15244,7 +15850,11 @@ Objetivo
               </div>
               <div class="m-pair">
                 <div><label>Precio con IVA $</label><input id="material-base-cost-gross" type="text" inputmode="numeric" data-format="clp" value="${formatNumber(materialGrossFromNet(form.baseCost))}" placeholder="Con IVA" /></div>
-                <div class="small">El neto se usa como costo. Ingresa cualquiera de los dos y el otro se calcula solo.</div>
+                <div class="small">Ingresa cualquiera de los dos y el otro se calcula solo.</div>
+              </div>
+              <div class="m-pair">
+                <div>${renderPurchaseDocField(form)}</div>
+                <div>${renderListPriceField(form)}</div>
               </div>
               ${renderDatabaseCalculationFields(form)}
               ${buildFormulaBlock(form, preview)}
@@ -15362,9 +15972,11 @@ Objetivo
         </div>`;
     }
 
+    const pendingReview = (state.database.materials || []).filter((item) => window.ERMStorage.isPendingNetReview(item)).length;
     return `
       <div class="card">
         <div class="section-title"><div><h2>Base de datos</h2></div></div>
+        ${pendingReview ? `<p class="quote-rule-notice is-legacy">${pendingReview} insumo(s) por revisar el IVA. Hazlo desde el computador (Base de datos › Revisar IVA).</p>` : ''}
         <div class="mobile-home-menu">
           <button type="button" class="btn mobile-home-btn" data-action="db-open-view" data-view-key="new"><span>Insumo / Servicio nuevo</span></button>
           <button type="button" class="btn mobile-home-btn" data-action="db-open-view" data-view-key="table"><span>Base de datos de insumos</span></button>
@@ -15408,7 +16020,9 @@ Objetivo
         ['Grupo', sanitize(item.group || '')],
         ['Proveedor', sanitize(item.provider || 'Sin proveedor')],
         ['Fecha', sanitize(item.createdAt || '')],
-        ['Costo base', formatCurrencySmart(item.baseCost)],
+        ['Precio neto', `${formatCurrencySmart(item.baseCost)} · con IVA ${formatCurrencySmart(materialGrossFromNet(item.baseCost))}`],
+        ['Se compra con', sanitize(purchaseDocLabel(item))],
+        ...(Number(item.listPrice) > 0 ? [['Precio de lista', `${formatCurrencySmart(item.listPrice)} neto por ${sanitize(renderCalculationUnitLabel(item.calculationUnit))}`]] : []),
         ['Resultado aplicado', `${formatCurrencySmart(item.unitCost)} ${sanitize(renderCalculationUnitLabel(item.calculationUnit))}<br><span class="small">${sanitize(item.formulaSummary || '')}</span>`],
         ['Dirección', sanitize(item.supplierAddress || '')],
         ['Contacto', sanitize(item.supplierContact || '')],
@@ -15535,6 +16149,8 @@ Objetivo
       name: draft.name ?? editing.name ?? '',
       calculationUnit: draft.calculationUnit ?? editing.calculationUnit ?? 'cm2',
       baseCost: draft.baseCost ?? editing.baseCost ?? 0,
+      purchaseDoc: draft.purchaseDoc ?? editing.purchaseDoc ?? '',
+      listPrice: draft.listPrice ?? editing.listPrice ?? 0,
       notes: draft.notes ?? editing.notes ?? '',
       provider: draft.provider ?? editing.provider ?? '',
       supplierAddress: draft.supplierAddress ?? editing.supplierAddress ?? '',
@@ -15598,7 +16214,7 @@ Objetivo
           <div class="small">${sanitize(item.provider || 'Sin proveedor')}</div>
         </td>
         <td>${sanitize(item.createdAt || '-')}</td>
-        <td>${formatCurrencySmart(item.baseCost)}</td>
+        <td>${formatCurrencySmart(item.baseCost)} <div class="small">neto · ${sanitize(purchaseDocLabel(item))}</div></td>
         <td>${formatCurrencySmart(item.unitCost)} <div class="small">${sanitize(item.formulaSummary || '')}</div></td>
         <td>${sanitize(item.notes || '')}</td>
         <td>
@@ -15626,12 +16242,14 @@ Objetivo
     const formOpen = Boolean(state.ui.databaseFormOpen || state.ui.editingMaterialId || state.ui.databaseDraft);
     return `
       ${sectionTabs}
+      ${renderNetReviewPanel()}
       <div class="db-split has-ficha">
       ${formOpen ? `<div class="card db-ficha">
         <div class="section-title">
           <div>
             <h3>${state.ui.editingMaterialId ? `Editar insumo · ${sanitize(editing.name || '')}` : 'Ficha de insumo nuevo'}</h3>
             <p class="subtitle">Identificación, costeo base, compra, imagen y notas. El costo por unidad se usa en el presupuestador.</p>
+            ${window.ERMStorage.isPendingNetReview(editing) && state.ui.editingMaterialId ? '<p class="quote-rule-notice is-legacy">Insumo por revisar: el valor guardado puede tener IVA. Escribe el precio neto (o el precio con IVA) antes de guardar.</p>' : ''}
           </div>
           <button class="btn btn-soft" data-action="cancel-edit-material">Cerrar ficha</button>
         </div>
@@ -15682,7 +16300,7 @@ Objetivo
               <div>
                 <label class="label-with-tip">
                   <span>Precio neto $</span>
-                  ${renderInfoTip('Precio sin IVA. Es el que se usa como costo en el presupuestador (el IVA de compra es crédito fiscal). Si ingresas el precio con IVA, este se calcula solo.')}
+                  ${renderInfoTip('Precio sin IVA. Si ingresas el precio con IVA, este se calcula solo. El costo en el presupuestador depende de cómo se compra: con boleta se suma el IVA, con factura queda el neto.')}
                 </label>
                 <input id="material-base-cost" type="text" data-format="clp" min="0" step="1" data-db-draft="baseCost" value="${formatNumber(form.baseCost || 0)}" placeholder="Sin IVA" />
               </div>
@@ -15690,6 +16308,8 @@ Objetivo
                 <label>Precio con IVA $</label>
                 <input id="material-base-cost-gross" type="text" data-format="clp" min="0" step="1" value="${formatNumber(materialGrossFromNet(form.baseCost))}" placeholder="Con IVA" />
               </div>
+              <div>${renderPurchaseDocField(form)}</div>
+              <div>${renderListPriceField(form)}</div>
               <div class="formula-preview formula-preview-compact card-soft">
                 <strong>Resultado aplicado</strong>
                 <div class="small">${sanitize(preview.description)}</div>
