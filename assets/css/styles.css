@@ -2878,6 +2878,7 @@ body.theme-dark .ot-card.ot-tile.is-delivered { background: #1a1a1a; }
 @media (max-width: 780px) {
   .ot-toolbar { border: 0; padding: 0; }
   .ot-chips { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); width: 100%; }
+  .ot-chip.is-all { grid-column: 1 / -1; }
   .ot-chip { justify-content: space-between; min-width: 0; }
   .ot-chip-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .ot-toolbar-actions { width: 100%; display: grid; grid-template-columns: minmax(0, 1fr) auto; }

@@ -4358,7 +4358,7 @@ Objetivo
 
       if (action === 'set-order-group-priority') {
         const group = actionBtn.dataset.group || '';
-        state.ui.orderGroupPriority = state.ui.orderGroupPriority === group ? '' : group;
+        state.ui.orderGroupPriority = !group || state.ui.orderGroupPriority === group ? '' : group;
         render();
       }
 
@@ -7819,6 +7819,19 @@ Objetivo
     const text = String(value || '').trim().toUpperCase();
     const match = text.match(/(\d+)/);
     return match ? `#${Number(match[1])}` : text;
+  }
+
+  // Orden ascendente: N° de OT (las sin número van al final) y luego la fecha de la cotización.
+  function compareOrdersByNumber(a, b) {
+    const numA = getOrderNumberValue(a.orderNumber);
+    const numB = getOrderNumberValue(b.orderNumber);
+    if (numA !== numB) {
+      if (!numA) return 1;
+      if (!numB) return -1;
+      return numA - numB;
+    }
+    const dateOf = (order) => String(order.quote?.quoteDate || order.quoteDate || order.createdAt || order.savedAt || '');
+    return dateOf(a).localeCompare(dateOf(b));
   }
 
   function getOrderNumberValue(value) {
@@ -12387,10 +12400,10 @@ Objetivo
       return item.status === filter;
     });
 
-    const sortByOrderNumber = Boolean(state.ui.orderSortByNumber);
-    if (sortByOrderNumber) {
-      visibleOrders.sort((a, b) => String(a.orderNumber || '').localeCompare(String(b.orderNumber || ''), undefined, { numeric: true, sensitivity: 'base' }));
-    }
+    // Siempre por N° de OT y, a igual número o sin número (prototipos, prospectos), por fecha.
+    // state.ui.orderSortByNumber = true → de menor a mayor; false (por defecto) → de mayor a menor.
+    const sortAscending = Boolean(state.ui.orderSortByNumber);
+    visibleOrders.sort((a, b) => compareOrdersByNumber(a, b) * (sortAscending ? 1 : -1));
     // El círculo seleccionado sube su grupo al inicio de la lista (sort estable: conserva el orden previo).
     const priorityGroups = [...ORDER_GROUPS, ORDER_WARNINGS_GROUP];
     const groupPriority = priorityGroups.some((group) => group.key === state.ui.orderGroupPriority) ? state.ui.orderGroupPriority : '';
@@ -12403,7 +12416,12 @@ Objetivo
       groupCounts[getOrderGroup(order)] += 1;
       if (getOrderWarnings(order).length) groupCounts.warnings += 1;
     });
-    const groupCircles = priorityGroups.map((group) => `
+    const allChip = `
+      <button type="button" class="ot-chip is-all ${groupPriority ? '' : 'active'}" data-action="set-order-group-priority" data-group="" aria-pressed="${!groupPriority}" title="Todas las OT, sin destacar ningún grupo">
+        <span class="ot-chip-label">Todas</span>
+        <span class="ot-chip-count">${(state.orders || []).length}</span>
+      </button>`;
+    const groupCircles = allChip + priorityGroups.map((group) => `
       <button type="button" class="ot-chip ${group.className} ${groupPriority === group.key ? 'active' : ''}" data-action="set-order-group-priority" data-group="${group.key}" aria-pressed="${groupPriority === group.key}" title="Mostrar primero: ${group.label}">
         <span class="ot-chip-label">${group.label}</span>
         <span class="ot-chip-count">${groupCounts[group.key]}</span>
@@ -12687,7 +12705,7 @@ Objetivo
               <span class="picker-trigger-label">Categoría: ${sanitize(currentFilterLabel)}</span>
               <span class="picker-trigger-caret" aria-hidden="true">▾</span>
             </button>
-            <button class="btn btn-soft ${sortByOrderNumber ? 'active' : ''}" data-action="toggle-order-sort" title="Ordenar las OT por número de orden">${sortByOrderNumber ? '✓ ' : ''}Ordenar por N° OT</button>
+            <button class="btn btn-soft" data-action="toggle-order-sort" title="Cambiar el orden: por N° de OT y, sin número, por fecha">N° OT: ${sortAscending ? 'menor a mayor ↑' : 'mayor a menor ↓'}</button>
           </div>
         </div>
 
