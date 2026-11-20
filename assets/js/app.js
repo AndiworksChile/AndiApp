@@ -12391,8 +12391,7 @@ Objetivo
   function renderOrdersPanel() {
     const storedFilter = state.ui.orderFilter || 'Todas';
     const filter = storedFilter === 'Activas' ? 'En fabricación' : storedFilter;
-    const selectedOrder = (state.orders || []).find((item) => idsEqual(item.id, state.ui.selectedOrderId)) || state.orders?.[0] || null;
-    const visibleOrders = (state.orders || []).filter((item) => {
+    let visibleOrders = (state.orders || []).filter((item) => {
       const deliveryState = item.deliveryState || item.quote?.deliveryState || 'Abierta';
       if (filter === 'Todas') return true;
       if (filter === 'En fabricación') return !isPrototypeOrder(item) && !isDeliveryCompleted(deliveryState);
@@ -12404,13 +12403,18 @@ Objetivo
     // state.ui.orderSortByNumber = true → de menor a mayor; false (por defecto) → de mayor a menor.
     const sortAscending = Boolean(state.ui.orderSortByNumber);
     visibleOrders.sort((a, b) => compareOrdersByNumber(a, b) * (sortAscending ? 1 : -1));
-    // El círculo seleccionado sube su grupo al inicio de la lista (sort estable: conserva el orden previo).
+    // El chip elegido muestra solo las OT de su grupo; "Todas" (orderGroupPriority vacío) las muestra todas.
     const priorityGroups = [...ORDER_GROUPS, ORDER_WARNINGS_GROUP];
     const groupPriority = priorityGroups.some((group) => group.key === state.ui.orderGroupPriority) ? state.ui.orderGroupPriority : '';
     const inPriorityGroup = (order) => (groupPriority === 'warnings' ? getOrderWarnings(order).length > 0 : getOrderGroup(order) === groupPriority);
-    if (groupPriority) {
-      visibleOrders.sort((a, b) => Number(inPriorityGroup(b)) - Number(inPriorityGroup(a)));
-    }
+    if (groupPriority) visibleOrders = visibleOrders.filter(inPriorityGroup);
+    // La ficha muestra la OT elegida si está a la vista; si el filtro la ocultó, la primera visible.
+    const selectedOrder = visibleOrders.find((item) => idsEqual(item.id, state.ui.selectedOrderId))
+      || visibleOrders[0]
+      || (groupPriority ? null : (state.orders || []).find((item) => idsEqual(item.id, state.ui.selectedOrderId)) || state.orders?.[0] || null);
+    const emptyGroupText = groupPriority && (state.orders || []).length
+      ? `No hay OT en «${sanitize(priorityGroups.find((group) => group.key === groupPriority)?.label || '')}». Toca «Todas» para verlas todas.`
+      : '';
     const groupCounts = { pending: 0, delivered: 0, prototype: 0, warnings: 0 };
     (state.orders || []).forEach((order) => {
       groupCounts[getOrderGroup(order)] += 1;
@@ -12422,7 +12426,7 @@ Objetivo
         <span class="ot-chip-count">${(state.orders || []).length}</span>
       </button>`;
     const groupCircles = allChip + priorityGroups.map((group) => `
-      <button type="button" class="ot-chip ${group.className} ${groupPriority === group.key ? 'active' : ''}" data-action="set-order-group-priority" data-group="${group.key}" aria-pressed="${groupPriority === group.key}" title="Mostrar primero: ${group.label}">
+      <button type="button" class="ot-chip ${group.className} ${groupPriority === group.key ? 'active' : ''}" data-action="set-order-group-priority" data-group="${group.key}" aria-pressed="${groupPriority === group.key}" title="Mostrar solo: ${group.label}">
         <span class="ot-chip-label">${group.label}</span>
         <span class="ot-chip-count">${groupCounts[group.key]}</span>
       </button>
@@ -12699,7 +12703,7 @@ Objetivo
         ${renderSalesGoalBar()}
 
         <div class="ot-toolbar">
-          <div class="ot-chips" role="group" aria-label="Mostrar primero">${groupCircles}</div>
+          <div class="ot-chips" role="group" aria-label="Filtrar OT">${groupCircles}</div>
           <div class="ot-toolbar-actions">
             <button type="button" class="btn btn-soft picker-trigger-btn" data-action="open-order-filter-picker" title="Filtrar OT por categoría">
               <span class="picker-trigger-label">Categoría: ${sanitize(currentFilterLabel)}</span>
@@ -12711,7 +12715,7 @@ Objetivo
 
         <div class="ot-layout ${state.ui.orderFichaOpen ? 'is-ficha-open' : ''}">
           <div class="ot-grid">
-            ${cards || '<div class="empty-state">Todavía no hay órdenes guardadas en el sistema. Importa la Base OT desde la Central de Descargas.</div>'}
+            ${cards || `<div class="empty-state">${emptyGroupText || 'Todavía no hay órdenes guardadas en el sistema. Importa la Base OT desde la Central de Descargas.'}</div>`}
           </div>
           ${selectedOrder || cards ? `<aside class="ot-preview" aria-label="Ficha de la OT">
             <button type="button" class="btn btn-soft ot-preview-back" data-action="close-order-ficha">‹ Volver a las OT</button>

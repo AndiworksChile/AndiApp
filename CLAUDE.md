@@ -61,7 +61,7 @@ Stage 3 features (2.1.2):
 - OT ficha has a "Tiempo" tab (`getOrderTimeDetail`): human hours, machine hours, total, per shift and per machine.
 - The login screen (sync.js) uses `assets/logo/logoapp.svg` with a CSS laser-cut animation; model-viewer is no longer loaded.
 
-Panel OT (2.1.4): a toolbar of chips (`ORDER_GROUPS` + `ORDER_WARNINGS_GROUP`, "Mostrar primero"; Advertencias = `getOrderWarnings()`), a mosaic of compact tiles (`.ot-card.ot-tile` in `.ot-grid`, CSS grid auto-fill) and the ficha (`.ot-preview`). The PAGE scrolls, never the columns: the ficha is `position: sticky` and `fitOrdersLayout()` sets a negative `top` when it is taller than the window. On mobile the ficha opens as a full-screen sheet (`state.ui.orderFichaOpen`, "‹ Volver"). Delivered tiles are not gold (brand palette).
+Panel OT (2.1.4): a toolbar of chips (`ORDER_GROUPS` + `ORDER_WARNINGS_GROUP`, each chip shows only its group, "Todas" shows all; Advertencias = `getOrderWarnings()`), a mosaic of compact tiles (`.ot-card.ot-tile` in `.ot-grid`, CSS grid auto-fill) and the ficha (`.ot-preview`). The PAGE scrolls, never the columns: the ficha is `position: sticky` and `fitOrdersLayout()` sets a negative `top` when it is taller than the window. On mobile the ficha opens as a full-screen sheet (`state.ui.orderFichaOpen`, "‹ Volver"). Delivered tiles are not gold (brand palette).
 
 2.1.5: Ayuda técnica (`docs` view) has two tabs (`state.ui.docsTab`): "Política de precios" (`renderDocsPolicy`, a didactic version of `POLITICA-DE-PRECIOS.md` with live Escenario values and a step-by-step calculator: `[data-docs-calc]` inputs update `#docs-calc-steps` without re-rendering) and "Fórmulas de la app". If the policy changes, update both the .md and this view.
 
