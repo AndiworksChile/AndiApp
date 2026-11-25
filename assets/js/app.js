@@ -462,6 +462,14 @@ Objetivo
     'Ahorros (DAP)'
   ];
 
+  // Cuadre con el banco: un movimiento de ajuste lleva el saldo de la app al saldo real del
+  // banco en una fecha, sin borrar el historial. No es venta ni gasto: no entra al IVA, a la
+  // meta anual, a los gráficos por categoría ni a ingresos/egresos del mes; sí entra a la caja.
+  const FINANCE_ADJUST_CATEGORY = 'Ajuste de cuadre';
+  function isFinanceAdjustment(entry) {
+    return entry?.category === FINANCE_ADJUST_CATEGORY;
+  }
+
   // Expense type catalogue — shared by Module 7 cards and Module 9 Gasto entries
   const expenseTypeOptions = [
     { value: 'Gastos Generales',   color: '#2563eb' },
@@ -478,7 +486,7 @@ Objetivo
     return {
       id: overrides.id || uid('fin'),
       date: overrides.date || new Date().toISOString().slice(0, 10),
-      category: financeCategories.includes(overrides.category) ? overrides.category : 'Ventas',
+      category: financeCategories.includes(overrides.category) || overrides.category === FINANCE_ADJUST_CATEGORY ? overrides.category : 'Ventas',
       orderId: String(overrides.orderId || ''),
       orderRef: String(overrides.orderRef || ''),
       gastoType: String(overrides.gastoType || ''),
@@ -489,7 +497,8 @@ Objetivo
       detail: String(overrides.detail || ''),
       income: Math.max(0, Number(overrides.income || 0) || 0),
       expense: Math.max(0, Number(overrides.expense || 0) || 0),
-      ivaIncluded: Boolean(overrides.ivaIncluded),
+      ivaIncluded: overrides.category === FINANCE_ADJUST_CATEGORY ? false : Boolean(overrides.ivaIncluded),
+      bankBalance: Number(overrides.bankBalance || 0) || 0,
       savingsEndDate: String(overrides.savingsEndDate || ''),
       attachments: normalizeAttachments(overrides.attachments || []),
       pdfDataUrl: String(overrides.pdfDataUrl || ''),
@@ -536,9 +545,11 @@ Objetivo
     }).join('');
 
     // ── KPIs ──────────────────────────────────────────────────────────
-    const totalIncome  = allEntries.reduce((s, e) => s + (Number(e.income) || 0), 0);
-    const totalExpense = allEntries.reduce((s, e) => s + (Number(e.expense) || 0), 0);
-    const finalBalance = Number(initialBalance || 0) + totalIncome - totalExpense;
+    const printSummary = getFinanceMonthSummary(allEntries, '');
+    const totalIncome  = printSummary.totalIncome;
+    const totalExpense = printSummary.totalExpense;
+    // El saldo final incluye los ajustes de cuadre (son plata real), aunque no sean ingreso ni egreso.
+    const finalBalance = Number(initialBalance || 0) + printSummary.cashChange;
     const printIvaRate = Number(state.scenario?.ivaRate) > 0 ? Number(state.scenario.ivaRate) : 0.19;
     const printIvaLedger = getFinanceIvaLedger(allEntries, openingIvaCredit, printIvaRate);
     const ivaNeto = printIvaLedger.totalToPayHistoric;
@@ -763,12 +774,35 @@ Objetivo
     });
   }
 
+  // Cuadres con el banco, del más reciente al más antiguo. Cada uno indica si la app sigue
+  // calzando con el banco en esa fecha: si después se agregan o corrigen movimientos con fecha
+  // anterior, el saldo en el punto del cuadre cambia y queda "descuadrado".
+  function getFinanceReconciliations() {
+    const rows = getFinanceRunningRows(state.finance?.entries || [], state.finance?.initialBalance || 0);
+    return rows.filter(isFinanceAdjustment).map((row) => {
+      const bankBalance = Number(row.bankBalance) || 0;
+      const amount = (Number(row.income) || 0) - (Number(row.expense) || 0);
+      const gap = bankBalance - row.runningBalance;
+      return { entry: row, bankBalance, amount, appBalanceBefore: row.runningBalance - amount, gap, ok: Math.abs(gap) < 1 };
+    }).reverse();
+  }
+
+  function setFinanceAdjustmentAmount(entry, amount) {
+    entry.income = amount > 0 ? Math.round(amount) : 0;
+    entry.expense = amount < 0 ? Math.round(-amount) : 0;
+  }
+
   function getFinanceMonthSummary(entries, monthFilter) {
     const source = monthFilter
       ? entries.filter((e) => String(e.date || '').startsWith(monthFilter))
       : entries;
-    const totalIncome = source.reduce((s, e) => s + (Number(e.income) || 0), 0);
-    const totalExpense = source.reduce((s, e) => s + (Number(e.expense) || 0), 0);
+    const regular = source.filter((e) => !isFinanceAdjustment(e));
+    const totalIncome = regular.reduce((s, e) => s + (Number(e.income) || 0), 0);
+    const totalExpense = regular.reduce((s, e) => s + (Number(e.expense) || 0), 0);
+    // Ajuste de cuadre (con signo): plata real que no quedó clasificada en ningún movimiento.
+    const adjustment = source.filter(isFinanceAdjustment)
+      .reduce((s, e) => s + (Number(e.income) || 0) - (Number(e.expense) || 0), 0);
+    const cashChange = totalIncome - totalExpense + adjustment;
     const ivaCollected = source
       .filter((e) => e.ivaIncluded && Number(e.income) > 0)
       .reduce((s, e) => s + Math.round((Number(e.income) || 0) * 0.19 / 1.19), 0);
@@ -776,7 +810,7 @@ Objetivo
       .filter((e) => e.ivaIncluded && Number(e.expense) > 0)
       .reduce((s, e) => s + Math.round((Number(e.expense) || 0) * 0.19 / 1.19), 0);
     const ivaToPay = Math.max(0, ivaCollected - ivaCredit);
-    return { totalIncome, totalExpense, ivaCollected, ivaCredit, ivaToPay, count: source.length };
+    return { totalIncome, totalExpense, adjustment, cashChange, ivaCollected, ivaCredit, ivaToPay, count: source.length };
   }
 
   // Calcula el IVA a declarar mes a mes, arrastrando el remanente de crédito fiscal que no
@@ -856,15 +890,12 @@ Objetivo
     const availMonths = getAvailableFinanceMonths(entries).slice(0, 12).reverse();
     if (!availMonths.length) return '<p class="help">Sin datos suficientes para el gráfico.</p>';
     const data = availMonths.map((month) => {
-      const me = entries.filter((e) => String(e.date || '').startsWith(month));
+      const sum = getFinanceMonthSummary(entries, month);
       const label = formatMonthLabel(month).split(' ')[0].slice(0, 3) + '\'' + month.slice(2, 4);
-      return {
-        label,
-        income:  me.reduce((s, e) => s + (Number(e.income)  || 0), 0),
-        expense: me.reduce((s, e) => s + (Number(e.expense) || 0), 0),
-      };
+      return { label, income: sum.totalIncome, expense: sum.totalExpense, adjustment: sum.adjustment };
     });
-    const maxVal = Math.max(...data.map((d) => Math.max(d.income, d.expense)), 1);
+    const hasAdjustments = data.some((d) => d.adjustment);
+    const maxVal = Math.max(...data.map((d) => Math.max(d.income, d.expense, Math.abs(d.adjustment))), 1);
     const W = 560, H = 230, padL = 62, padR = 10, padT = 12, padB = 52;
     const chartW = W - padL - padR;
     const chartH = H - padT - padB;
@@ -891,6 +922,12 @@ Objetivo
       const ex = cx + 1;
       bars += `<rect class="fin-anim-bar fin-hoverable-bar" data-fin-tooltip="${d.label} · Ingresos: ${formatCurrency(d.income)}" style="animation-delay:${40 + i * 55}ms" x="${ix.toFixed(1)}" y="${(baseY - incomeH).toFixed(1)}"  width="${barW}" height="${incomeH.toFixed(1)}"  fill="#16a34a" opacity="0.82" rx="2"/>`;
       bars += `<rect class="fin-anim-bar fin-hoverable-bar" data-fin-tooltip="${d.label} · Egresos: ${formatCurrency(d.expense)}" style="animation-delay:${70 + i * 55}ms" x="${ex.toFixed(1)}" y="${(baseY - expenseH).toFixed(1)}" width="${barW}" height="${expenseH.toFixed(1)}" fill="#dc2626" opacity="0.82" rx="2"/>`;
+      if (d.adjustment) {
+        // Ajuste de cuadre: barra gris delgada (sin clasificar), con su signo en el tooltip.
+        const adjH = Math.max((Math.abs(d.adjustment) / maxVal) * chartH, 2);
+        const adjW = Math.max(Math.round(barW * 0.45), 4);
+        bars += `<rect class="fin-anim-bar fin-hoverable-bar" data-fin-tooltip="${d.label} · Ajuste de cuadre (sin clasificar): ${d.adjustment > 0 ? '+' : '−'}${formatCurrency(Math.abs(d.adjustment))}" style="animation-delay:${90 + i * 55}ms" x="${(ex + barW + 2).toFixed(1)}" y="${(baseY - adjH).toFixed(1)}" width="${adjW}" height="${adjH.toFixed(1)}" fill="#9aa0a6" opacity="0.9" rx="2"/>`;
+      }
       xLabels += `<text x="${cx.toFixed(1)}" y="${(baseY + 16).toFixed(1)}" text-anchor="middle" font-size="9" fill="#9ca3af">${d.label}</text>`;
     });
     const legend = [
@@ -898,6 +935,7 @@ Objetivo
       `<text x="${padL + 13}"  y="${H - 5}"  font-size="10" fill="#6b7280">Ingresos</text>`,
       `<rect x="${padL + 72}"  y="${H - 14}" width="10" height="10" fill="#dc2626" rx="2"/>`,
       `<text x="${padL + 85}"  y="${H - 5}"  font-size="10" fill="#6b7280">Egresos</text>`,
+      hasAdjustments ? `<rect x="${padL + 140}" y="${H - 14}" width="10" height="10" fill="#9aa0a6" rx="2"/><text x="${padL + 153}" y="${H - 5}" font-size="10" fill="#6b7280">Ajuste de cuadre (sin clasificar)</text>` : '',
     ].join('');
     return `<svg class="fin-chart-svg fin-chart-svg-bar" viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;display:block;" xmlns="http://www.w3.org/2000/svg">
       ${gridLines}
@@ -911,7 +949,7 @@ Objetivo
   function buildFinanceCategoryDonutSVG(entries, type) {
     const catColors = { Ventas: '#16a34a', Materiales: '#2563eb', 'Gastos Administrativos': '#d97706', 'Salida General': '#b45309', Sueldo: '#7c3aed', Herramientas: '#0891b2', 'Ingreso de Capital': '#059669', 'Ahorros (DAP)': '#0e7490' };
     const amtByCat = {};
-    entries.forEach((e) => {
+    entries.filter((e) => !isFinanceAdjustment(e)).forEach((e) => {
       const amt = type === 'income' ? Number(e.income) : Number(e.expense);
       if (amt > 0) {
         const cat = e.category || 'Varios';
@@ -967,7 +1005,8 @@ Objetivo
   // Mini donut for one month — compact legend with color + percentage + CLP
   function buildFinanceMiniDonutSVG(entries, type, month) {
     const catColors = { Ventas: '#16a34a', Materiales: '#2563eb', 'Gastos Administrativos': '#d97706', 'Salida General': '#b45309', Sueldo: '#7c3aed', Herramientas: '#0891b2', 'Ingreso de Capital': '#059669', 'Ahorros (DAP)': '#0e7490' };
-    const monthEntries = month ? entries.filter((e) => String(e.date || '').startsWith(month)) : entries;
+    const monthEntries = (month ? entries.filter((e) => String(e.date || '').startsWith(month)) : entries)
+      .filter((e) => !isFinanceAdjustment(e));
     const amtByCat = {};
     monthEntries.forEach((e) => {
       const amt = type === 'income' ? Number(e.income) : Number(e.expense);
@@ -1683,7 +1722,7 @@ Objetivo
     const monthKey = toLocalDateValue(now).slice(0, 7);
     const monthName = MONTH_NAMES[now.getMonth()];
     const month = getFinanceMonthSummary(entries, monthKey);
-    if (month.count) {
+    if (month.totalIncome || month.totalExpense) {
       const diff = month.totalIncome - month.totalExpense;
       insights.push(diff < 0
         ? { tone: 'bad', title: `${monthName} va con más egresos que ingresos`, detail: `Ingresos ${formatCurrency(month.totalIncome)} · egresos ${formatCurrency(month.totalExpense)} · diferencia ${formatCurrency(diff)}.` }
@@ -1696,6 +1735,16 @@ Objetivo
       insights.push(ivaRow.ivaToPay > 0
         ? { tone: 'warn', title: `IVA estimado del F29 de ${monthName}: ${formatCurrency(ivaRow.ivaToPay)}`, detail: `Débito ${formatCurrency(ivaRow.ivaDebito)} menos crédito disponible ${formatCurrency(ivaRow.creditoDisponible)}.`, action: 'data-action="set-finance-tab" data-tab="res"', cta: 'Ver IVA' }
         : { tone: 'good', title: `Sin IVA a pagar en ${monthName}`, detail: `Queda un remanente de crédito fiscal de ${formatCurrency(ivaRow.remanenteFin)} para el mes siguiente.`, action: 'data-action="set-finance-tab" data-tab="res"', cta: 'Ver IVA' });
+    }
+
+    const lastReconcile = getFinanceReconciliations()[0];
+    if (lastReconcile) {
+      const when = formatFinanceDate(lastReconcile.entry.date);
+      insights.push(!lastReconcile.ok
+        ? { tone: 'bad', title: `La app ya no calza con el banco del ${when}`, detail: `Se agregaron o corrigieron movimientos con fecha anterior al cuadre: diferencia de ${formatCurrency(lastReconcile.gap)}. Recalcula el ajuste en Saldos.`, action: 'data-action="set-finance-tab" data-tab="saldos"', cta: 'Ver cuadre' }
+        : Math.abs(lastReconcile.amount) >= 1
+          ? { tone: 'info', title: `Cuadre del ${when}: ${formatCurrency(Math.abs(lastReconcile.amount))} ${lastReconcile.amount < 0 ? 'de egresos' : 'de ingresos'} sin clasificar`, detail: 'Está en el saldo, pero no en ventas, gastos, IVA ni gráficos por categoría. Si recuerdas alguno, regístralo con su fecha y recalcula el ajuste.', action: 'data-action="set-finance-tab" data-tab="saldos"', cta: 'Ver cuadre' }
+          : { tone: 'good', title: `La app calza con el banco desde el ${when}`, detail: 'Registra cada venta y compra con su fecha para que siga así.' });
     }
 
     const rows = getFinanceRunningRows(entries, state.finance?.initialBalance || 0);
@@ -5434,6 +5483,56 @@ Objetivo
       if (action === 'toggle-finance-iva-credit-lock') {
         state.finance = state.finance || { initialBalance: 0, ivaCreditBalance: 0, entries: [] };
         state.finance.ivaCreditBalanceLocked = !state.finance.ivaCreditBalanceLocked;
+        window.ERMStorage.save(state);
+        render();
+        return;
+      }
+
+      if (action === 'save-finance-reconcile') {
+        state.finance = state.finance || { initialBalance: 0, ivaCreditBalance: 0, entries: [] };
+        const date = String(document.getElementById('finance-reconcile-date')?.value || '').trim();
+        const rawBank = String(document.getElementById('finance-reconcile-bank')?.value || '').trim();
+        if (!date || !rawBank) { window.alert('Ingresa la fecha y el saldo real del banco.'); return; }
+        const bankBalance = parseClpNumber(rawBank);
+        // Saldo de la app al cierre de esa fecha (incluye los movimientos de ese mismo día).
+        const appBalance = (Number(state.finance.initialBalance) || 0) + (state.finance.entries || [])
+          .filter((e) => e.date && e.date <= date)
+          .reduce((s, e) => s + (Number(e.income) || 0) - (Number(e.expense) || 0), 0);
+        const diff = Math.round(bankBalance - appBalance);
+        const later = (state.finance.entries || []).filter((e) => e.date && e.date > date).length;
+        const message = `Banco al ${formatFinanceDate(date)}: ${formatCurrency(bankBalance)}\nSegún la app: ${formatCurrency(appBalance)}\n\n`
+          + (Math.abs(diff) < 1
+            ? 'Ya calzan. Se guardará el cuadre sin ajuste.'
+            : `Se creará un ajuste de cuadre de ${diff > 0 ? '+' : '−'}${formatCurrency(Math.abs(diff))} (${diff > 0 ? 'ingresos' : 'egresos'} sin clasificar).`)
+          + (later ? `\n\nOjo: hay ${later} movimiento(s) con fecha posterior; seguirán sumando después del cuadre.` : '')
+          + '\n\n¿Continuar?';
+        if (!confirmSafe(message)) return;
+        const entry = createFinanceEntry({
+          date,
+          category: FINANCE_ADJUST_CATEGORY,
+          title: 'Cuadre con el banco',
+          detail: `Saldo del banco ${formatCurrency(bankBalance)} · la app tenía ${formatCurrency(appBalance)}`,
+          bankBalance
+        });
+        setFinanceAdjustmentAmount(entry, diff);
+        state.finance.entries.unshift(entry);
+        stampBaseUpdate('finance', { silent: true });
+        logActivity(`Finanzas: cuadre con el banco al ${formatFinanceDate(date)} (${formatCurrency(bankBalance)})`);
+        window.ERMStorage.save(state);
+        render();
+        return;
+      }
+
+      if (action === 'recalc-finance-reconcile') {
+        const item = getFinanceReconciliations().find((r) => r.entry.id === actionBtn.dataset.id);
+        const entry = (state.finance?.entries || []).find((e) => e.id === actionBtn.dataset.id);
+        if (!item || !entry) return;
+        const diff = Math.round(item.bankBalance - item.appBalanceBefore);
+        if (!confirmSafe(`El ajuste del ${formatFinanceDate(entry.date)} pasará de ${formatCurrency(item.amount)} a ${formatCurrency(diff)} para que la app vuelva a calzar con el banco (${formatCurrency(item.bankBalance)}). ¿Continuar?`)) return;
+        setFinanceAdjustmentAmount(entry, diff);
+        entry.detail = `Saldo del banco ${formatCurrency(item.bankBalance)} · la app tenía ${formatCurrency(item.appBalanceBefore)}`;
+        stampBaseUpdate('finance', { silent: true });
+        logActivity(`Finanzas: ajuste de cuadre del ${formatFinanceDate(entry.date)} recalculado`);
         window.ERMStorage.save(state);
         render();
         return;
@@ -13354,6 +13453,38 @@ Objetivo
     `;
   }
 
+  // Panel "Cuadrar con el banco" (Finanzas › Saldos y PDF).
+  function renderFinanceReconcilePanel(currentBalance) {
+    const list = getFinanceReconciliations();
+    const historyRows = list.slice(0, 6).map((item) => `
+      <div class="fin-reconcile-row ${item.ok ? '' : 'is-bad'}">
+        <span class="mono">${sanitize(formatFinanceDate(item.entry.date))}</span>
+        <span>Banco <strong class="mono">${formatCurrency(item.bankBalance)}</strong> · ajuste <span class="mono">${item.amount > 0 ? '+' : item.amount < 0 ? '−' : ''}${formatCurrency(Math.abs(item.amount))}</span></span>
+        <span class="${item.ok ? 'is-ok' : 'is-bad'}">${item.ok ? '✓ Calza' : `⚠ Descuadre ${formatCurrency(item.gap)}`}</span>
+        ${item.ok ? '' : `<button type="button" class="btn btn-soft btn-xs" data-action="recalc-finance-reconcile" data-id="${sanitize(item.entry.id)}" title="Ajusta el monto para que la app vuelva a calzar con el banco en esa fecha">Recalcular</button>`}
+      </div>`).join('');
+    return `
+      <div class="fin-reconcile">
+        <div class="fin-reconcile-head">
+          <strong>Cuadrar con el banco</strong>
+          <span class="help" style="margin:0;">Si dejaste de registrar un tiempo, ingresa lo que sepas con su fecha y luego el saldo real del banco. La app crea un <em>ajuste de cuadre</em> por la diferencia: queda en la caja, pero no cuenta como venta, gasto ni IVA. El historial no se borra.</span>
+        </div>
+        <div class="fin-reconcile-form">
+          <div>
+            <label for="finance-reconcile-date">Fecha del saldo</label>
+            <input type="date" id="finance-reconcile-date" value="${sanitize(toLocalDateValue(new Date()))}" />
+          </div>
+          <div>
+            <label for="finance-reconcile-bank">Saldo real en el banco</label>
+            <input type="text" data-format="clp" id="finance-reconcile-bank" placeholder="Ej: 412.350" />
+          </div>
+          <button type="button" class="btn btn-primary" data-action="save-finance-reconcile">Cuadrar</button>
+          <span class="help" style="margin:0;">Saldo según la app hoy: <strong class="mono">${formatCurrency(currentBalance)}</strong></span>
+        </div>
+        ${historyRows ? `<div class="fin-reconcile-list">${historyRows}</div>` : ''}
+      </div>`;
+  }
+
   function renderFinanceModule() {
     state.finance = state.finance || { initialBalance: 0, ivaCreditBalance: 0, entries: [] };
     state.finance.entries = Array.isArray(state.finance.entries) ? state.finance.entries : [];
@@ -13608,7 +13739,8 @@ Objetivo
         return {
           monthKey,
           monthLabel: formatMonthLabel(monthKey),
-          saldoMes: monthSummary.totalIncome - monthSummary.totalExpense,
+          saldoMes: monthSummary.cashChange,
+          ajusteMes: monthSummary.adjustment,
           ingresosMes: monthSummary.totalIncome,
           egresosMes: monthSummary.totalExpense,
           ivaMes: ivaLedger.byMonth[monthKey]?.ivaToPay || 0,
@@ -13626,8 +13758,9 @@ Objetivo
     const ledgerRows = displayRunningRows.map((row, rowIndex) => {
       const isIncome = Number(row.income) > 0;
       const isSavings = row.category === 'Ahorros (DAP)';
+      const isAdjust = isFinanceAdjustment(row);
       const isHighlighted = row.id === financeHighlightEntryId;
-      const rowClass = isIncome ? 'finance-row-income' : (isSavings && Number(row.expense) > 0 ? 'finance-row-savings' : (Number(row.expense) > 0 ? 'finance-row-expense' : ''));
+      const rowClass = isAdjust ? 'finance-row-adjust' : isIncome ? 'finance-row-income' : (isSavings && Number(row.expense) > 0 ? 'finance-row-savings' : (Number(row.expense) > 0 ? 'finance-row-expense' : ''));
       const balanceNeg = row.runningBalance < 0;
       const rowMonth = String(row.date || '').slice(0, 7);
       const isMonthStart = rowIndex > 0 && rowMonth !== prevRowMonth;
@@ -13665,6 +13798,8 @@ Objetivo
         tipoCell = row.ivaIncluded
           ? `<span style="color:#7c3aed;font-size:10px;">Factura</span>`
           : `<span style="color:#6b7280;font-size:10px;">Boleta</span>`;
+      } else if (isAdjust) {
+        tipoCell = `<span style="color:var(--muted);">Banco: ${formatCurrency(row.bankBalance || 0)}</span>`;
       } else if (row.category === 'Ahorros (DAP)') {
         tipoCell = row.savingsEndDate
           ? `<span style="font-size:10px;color:var(--muted);">Término: ${sanitize(row.savingsEndDate)}</span>`
@@ -13678,7 +13813,7 @@ Objetivo
       return `
         <tr id="fin-entry-${sanitize(row.id)}" class="${rowClass}${monthStartClass}${isHighlighted ? ' finance-row-highlight' : ''}">
           <td><span class="small">${sanitize(rowDateLabel)}</span></td>
-          <td><span class="pill ${row.category === 'Ventas' ? 'ok' : 'info'}" style="font-size:10px;padding:2px 7px;">${sanitize(row.category)}</span></td>
+          <td><span class="pill ${row.category === 'Ventas' ? 'ok' : isAdjust ? 'pill-adjust' : 'info'}" style="font-size:10px;padding:2px 7px;">${sanitize(row.category)}</span></td>
           <td><span class="small">${tipoCell}</span></td>
           <td style="text-align:center;">${pdfDocIcon}</td>
           <td><strong>${sanitize(row.title)}</strong>${row.detail ? `<br><span class="small" style="color:var(--muted);">${sanitize(row.detail)}</span>` : ''}${rowHasPdf ? `<br><span class="small" style="color:var(--muted);cursor:pointer;" data-action="view-herramienta-entry-pdf" data-id="${sanitize(row.id)}">${sanitize(rowAttachment?.fileName || 'doc.pdf')}</span>` : ''}</td>
@@ -13689,7 +13824,9 @@ Objetivo
           <td>
             <div class="button-group compact-actions">
               ${rowHasPdf ? `<button class="btn btn-soft btn-icon" data-action="view-herramienta-entry-pdf" data-id="${sanitize(row.id)}" title="Ver PDF" aria-label="Ver PDF">▤</button>` : ''}
-              <button class="btn btn-soft btn-icon ${financeEditingEntryId === row.id ? 'btn-active' : ''}" data-action="edit-finance-entry" data-id="${sanitize(row.id)}" title="Editar" aria-label="Editar">${iconSvg('edit')}</button>
+              ${isAdjust
+                ? `<button class="btn btn-soft btn-icon" data-action="set-finance-tab" data-tab="saldos" title="El ajuste se recalcula en Saldos" aria-label="Ver cuadre">${iconSvg('edit')}</button>`
+                : `<button class="btn btn-soft btn-icon ${financeEditingEntryId === row.id ? 'btn-active' : ''}" data-action="edit-finance-entry" data-id="${sanitize(row.id)}" title="Editar" aria-label="Editar">${iconSvg('edit')}</button>`}
               <button class="btn btn-soft btn-icon" data-action="delete-finance-entry" data-id="${sanitize(row.id)}" title="Eliminar" aria-label="Eliminar">${iconSvg('trash')}</button>
             </div>
           </td>
@@ -13771,6 +13908,8 @@ Objetivo
       } else if (ct.category === 'Ingreso de Capital') {
         const capEntries = allEntries.filter((e) => e.category === 'Ingreso de Capital');
         subDetail = `<div class="cat-row" style="font-size:11px;padding-left:10px;color:var(--muted);">${capEntries.length} inyecci${capEntries.length !== 1 ? 'ones' : 'ón'} de capital</div>`;
+      } else if (ct.category === FINANCE_ADJUST_CATEGORY) {
+        subDetail = `<div class="cat-row" style="font-size:11px;padding-left:10px;color:var(--muted);">Plata real sin clasificar (cuadres con el banco). No es venta ni gasto.</div>`;
       } else if (ct.category === 'Ahorros (DAP)') {
         const dapEntries = allEntries.filter((e) => e.category === 'Ahorros (DAP)');
         const active = dapEntries.filter((e) => e.savingsEndDate && e.savingsEndDate >= new Date().toISOString().slice(0,10));
@@ -13952,10 +14091,10 @@ Objetivo
                 <strong>${formatCurrency(currentBalance)}</strong>
                 <span class="finance-kpi-sub">Histórico acumulado</span>
               </div>
-              <div class="finance-kpi ${(monthSummaryCurrentMonth.totalIncome - monthSummaryCurrentMonth.totalExpense) >= 0 ? 'kpi-positive' : 'kpi-negative'}">
+              <div class="finance-kpi ${monthSummaryCurrentMonth.cashChange >= 0 ? 'kpi-positive' : 'kpi-negative'}">
                 <label>Saldo del mes</label>
-                <strong>${formatCurrency(monthSummaryCurrentMonth.totalIncome - monthSummaryCurrentMonth.totalExpense)}</strong>
-                <span class="finance-kpi-sub">${formatMonthLabel(currentMonth)}</span>
+                <strong>${formatCurrency(monthSummaryCurrentMonth.cashChange)}</strong>
+                <span class="finance-kpi-sub">${formatMonthLabel(currentMonth)}${monthSummaryCurrentMonth.adjustment ? ` · incluye ajuste de cuadre ${formatCurrency(monthSummaryCurrentMonth.adjustment)}` : ''}</span>
               </div>
               <div class="finance-kpi ${monthSummaryCurrentMonth.totalIncome > 0 ? 'kpi-positive' : ''}">
                 <label>Ingresos (mes actual)</label>
@@ -14030,7 +14169,7 @@ Objetivo
               ${monthlySynthesis.map((item) => `
               <div class="finance-month-synth-row">
                 <div class="finance-month-synth-month"><strong>${sanitize(item.monthLabel)}</strong></div>
-                <div class="finance-month-synth-cell ${item.saldoMes >= 0 ? 'is-pos' : 'is-neg'}"><strong>${formatCurrency(item.saldoMes)}</strong><span>${sanitize(item.monthLabel)}</span></div>
+                <div class="finance-month-synth-cell ${item.saldoMes >= 0 ? 'is-pos' : 'is-neg'}"><strong>${formatCurrency(item.saldoMes)}</strong><span>${item.ajusteMes ? `incluye ajuste de cuadre ${formatCurrency(item.ajusteMes)}` : sanitize(item.monthLabel)}</span></div>
                 <div class="finance-month-synth-cell is-pos"><strong>${formatCurrency(item.ingresosMes)}</strong><span>${sanitize(item.monthLabel)}</span></div>
                 <div class="finance-month-synth-cell is-neg"><strong>${formatCurrency(item.egresosMes)}</strong><span>${sanitize(item.monthLabel)}</span></div>
                 <div class="finance-month-synth-cell is-neg"><strong>${formatCurrency(item.ivaMes)}</strong><span>${sanitize(item.monthLabel)}</span></div>
@@ -14117,7 +14256,7 @@ Objetivo
                   </span>
                 </div>`;
               }).join('');
-            const net = mSummary.totalIncome - mSummary.totalExpense;
+            const net = mSummary.cashChange;
             // Variation vs. previous month (availMonths sorted newest-first, so prev = mIdx+1)
             const prevMonth = availMonths[mIdx + 1];
             let variationHtml = '';
@@ -14292,6 +14431,8 @@ Objetivo
             </span>
           </div>`;
         })()}
+
+        ${renderFinanceReconcilePanel(currentBalance)}
 
         <!-- Imprimir PDF -->
         <div style="margin-top:24px;padding-top:16px;border-top:2px solid var(--line);display:flex;align-items:center;justify-content:flex-end;gap:10px;">

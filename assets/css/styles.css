@@ -3008,3 +3008,19 @@ body.theme-dark .ot-card.ot-tile.is-delivered { background: #1a1a1a; }
   .pp-step-value { grid-column: 2; }
 }
 
+
+/* Cuadre con el banco (Finanzas › Saldos): el ajuste es plata real sin clasificar, en gris. */
+.finance-row-adjust td { background: var(--panel-soft); }
+.finance-row-adjust .finance-income-cell,
+.finance-row-adjust .finance-expense-cell { color: var(--muted); font-style: italic; }
+.pill.pill-adjust { background: transparent; color: var(--muted); border-color: var(--line-strong); }
+.fin-reconcile { margin-bottom: 16px; padding: 12px 14px; background: var(--panel-soft); border: 1px solid var(--line); border-radius: var(--radius-card); display: flex; flex-direction: column; gap: 10px; }
+.fin-reconcile-head { display: flex; flex-direction: column; gap: 4px; }
+.fin-reconcile-form { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px; }
+.fin-reconcile-form > div { display: flex; flex-direction: column; gap: 4px; }
+.fin-reconcile-form label { font-size: 12px; font-weight: 600; color: var(--muted); }
+.fin-reconcile-form input { width: 170px; }
+.fin-reconcile-list { display: flex; flex-direction: column; border-top: 1px solid var(--line); }
+.fin-reconcile-row { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 6px 0; border-bottom: 1px solid var(--line); font-size: 13px; }
+.fin-reconcile-row .is-ok { color: var(--good); font-weight: 600; }
+.fin-reconcile-row .is-bad { color: #dc2626; font-weight: 600; }

@@ -510,7 +510,9 @@ window.ERMStorage = (() => {
         detail: String(entry.detail || ''),
         income: Math.max(0, Number(entry.income || 0) || 0),
         expense: Math.max(0, Number(entry.expense || 0) || 0),
-        ivaIncluded: Boolean(entry.ivaIncluded),
+        ivaIncluded: entry.category === 'Ajuste de cuadre' ? false : Boolean(entry.ivaIncluded),
+        // Solo en "Ajuste de cuadre": saldo real del banco en la fecha del cuadre.
+        bankBalance: Number(entry.bankBalance || 0) || 0,
         savingsEndDate: String(entry.savingsEndDate || ''),
         attachments: normalizeAttachments(entry.attachments || []),
         pdfDataUrl: String(entry.pdfDataUrl || ''),
